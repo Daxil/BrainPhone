@@ -5,7 +5,7 @@ import PatientCard from '../common/PatientCard';
 import type { PatientRecord } from '../../types';
 
 interface HomeScreenProps {
-  records: PatientRecord[];
+  records: PatientRecord[] | undefined;
   loading: boolean;
   onViewRecord: (record: PatientRecord) => void;
   onCreateNew: () => void;
@@ -19,7 +19,7 @@ export default function HomeScreen({
   onCreateNew,
   onOpenAssessments
 }: HomeScreenProps) {
-  console.log(' HomeScreen рендер, записи:', records.length, 'загрузка:', loading);
+  const recordsArray = records || [];
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -28,7 +28,7 @@ export default function HomeScreen({
       <main className="flex-1 px-6 py-8">
         <div className="max-w-4xl mx-auto">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-            <StatsCard type="records" value={records.length} label="Всего записей" />
+            <StatsCard type="records" value={recordsArray.length} label="Всего записей" />
             <StatsCard type="synced" value="Синхронизировано" label="Облачное резервирование" sublabel="Активно" />
             <StatsCard type="secure" value="Безопасно" label="Сквозное шифрование" sublabel="Включено" />
           </div>
@@ -72,24 +72,21 @@ export default function HomeScreen({
               <Loader2 className="w-8 h-8 animate-spin text-blue-600 mb-4" />
               <p className="text-gray-600">Загрузка записей...</p>
             </div>
-          ) : records.length > 0 ? (
+          ) : recordsArray.length > 0 ? (
             <div>
-              <h2 className="font-semibold text-gray-900 mb-4">Последние записи ({records.length})</h2>
+              <h2 className="font-semibold text-gray-900 mb-4">Последние записи ({recordsArray.length})</h2>
               <div className="space-y-3">
-                {records
-                  .filter(record => record !== undefined && record.id)
+                {recordsArray
+                  .filter((record): record is PatientRecord => record !== undefined && record !== null && !!record.id)
                   .slice(-5)
                   .reverse()
-                  .map((record, index) => {
-                    console.log(`Рендер записи ${index}:`, record.id, record.patientName);
-                    return (
-                      <PatientCard
-                        key={record.id || index}
-                        record={record}
-                        onClick={() => onViewRecord(record)}
-                      />
-                    );
-                  })}
+                  .map((record, index) => (
+                    <PatientCard
+                      key={record.id || `record-${index}`}
+                      record={record}
+                      onClick={() => onViewRecord(record)}
+                    />
+                  ))}
               </div>
             </div>
           ) : (

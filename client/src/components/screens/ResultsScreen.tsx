@@ -1,68 +1,66 @@
-import { Brain, Cloud } from 'lucide-react';
-import Header from '../layout/Header';
+import { CheckCircle, ChevronLeft } from 'lucide-react';
 import type { PatientRecord } from '../../types';
+import type { AudioRecording } from '../../types/forms';
 
 interface ResultsScreenProps {
-  currentRecord: PatientRecord | null;
+  record: PatientRecord | null;
+  audioRecordings: AudioRecording[];
   onBack: () => void;
-  onSave: () => void;
-  onView: () => void;
+  onContinue: () => void;
 }
 
-export default function ResultsScreen({ currentRecord, onBack, onSave, onView }: ResultsScreenProps) {
+export default function ResultsScreen({ record, audioRecordings, onBack, onContinue }: ResultsScreenProps) {
+  const completedCount = audioRecordings.filter(r => r.status === 'completed').length;
+
   return (
     <div className="min-h-screen bg-white flex flex-col">
-      <Header screen="results" onBack={onBack} patientId={currentRecord?.id} showMenu={false} />
+      <div className="border-b border-gray-200">
+        <div className="px-6 py-4">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+          >
+            <ChevronLeft className="w-5 h-5" />
+            <span>Назад</span>
+          </button>
+        </div>
+      </div>
 
-      <main className="flex-1 px-6 py-8 flex flex-col">
-        <div className="max-w-2xl mx-auto w-full flex-1 flex flex-col">
-          <div className="mb-8">
-            <div className="flex items-center gap-2 mb-4">
-              <Brain className="w-5 h-5 text-gray-700" />
-              <h2 className="font-semibold text-gray-900">Результаты анализа</h2>
-            </div>
+      <main className="flex-1 px-6 py-8">
+        <div className="max-w-2xl mx-auto text-center">
+          <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <CheckCircle className="w-10 h-10 text-green-600" />
+          </div>
 
-            <div className="grid grid-cols-3 gap-3 mb-4">
-              {currentRecord?.diseases?.slice(0, 6).map((disease, index) => (
-                <div key={index} className="relative aspect-square rounded-lg overflow-hidden border-2 border-gray-200">
-                  <div className="flex items-center justify-center h-full">
-                    <Brain className="w-10 h-10 text-gray-500" />
-                  </div>
-                  <div className="absolute bottom-0 left-0 right-0 bg-gray-50 text-gray-900 text-sm font-medium px-2 py-1">
-                    {disease.name}
-                  </div>
-                  <div className="absolute top-0 left-0 right-0 bg-blue-50 text-blue-900 text-sm font-semibold px-2 py-1">
-                    {disease.percentage}%
-                  </div>
-                </div>
-              ))}
-            </div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Запись завершена!</h1>
+          <p className="text-gray-600 mb-8">
+            Успешно записано {completedCount} из {audioRecordings.length} аудио
+          </p>
 
-            <div className="text-xs text-gray-500 space-y-2">
-              {currentRecord?.diseases?.map((disease, index) => (
-                <div key={index} className="flex justify-between py-1 border-b border-gray-100">
-                  <span className="font-medium">{disease.name}:</span>
-                  <span className="text-blue-600 font-semibold">{disease.percentage}%</span>
-                </div>
-              ))}
+          <div className="bg-gray-50 rounded-xl p-6 mb-8">
+            <h3 className="font-semibold text-gray-900 mb-4">Информация о пациенте</h3>
+            <div className="space-y-2 text-left">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Имя:</span>
+                <span className="font-medium">{record?.patientName || 'Не указано'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">ID:</span>
+                <span className="font-medium">{record?.id || 'Не указано'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Протокол:</span>
+                <span className="font-medium">{record?.protocolType || 'Не указано'}</span>
+              </div>
             </div>
           </div>
 
-          <div className="flex-1 min-h-8"></div>
-
           <div className="space-y-3">
             <button
-              onClick={onSave}
-              className="w-full bg-green-600 hover:bg-green-700 text-white rounded-xl py-4 font-medium transition-colors shadow-lg shadow-green-600/20 flex items-center justify-center gap-2"
+              onClick={onContinue}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-xl font-medium transition-colors"
             >
-              <Cloud className="w-5 h-5" />
-              <span>Сохранить запись</span>
-            </button>
-            <button
-              onClick={onView}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-4 font-medium transition-colors shadow-lg shadow-blue-600/20"
-            >
-              Просмотреть без сохранения
+              Вернуться на главную
             </button>
           </div>
         </div>

@@ -26,12 +26,16 @@ export const useAudioRecorder = ({
   });
   const [recordingTime, setRecordingTime] = useState(0);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioChunksRef = useRef<Float32Array[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const startTimeRef = useRef<number>(0);
-  const elapsedBeforePauseRef = useRef<number>(0);
-  const streamRef = useRef<MediaStream | null>(null);
+  const startTimeRef = useRef(0);
+  const elapsedBeforePauseRef = useRef(0);
+  const currentTimeRef = useRef(0);
+  const isPausedRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -42,113 +46,98 @@ export const useAudioRecorder = ({
       if (audioData.url) {
         URL.revokeObjectURL(audioData.url);
       }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
     };
   }, []);
 
+  const convertToWAV = (audioBuffer: Float32Array[], sampleRate: number, channels: number): Blob => {
+    const numOfChan = channels;
+    const totalLength = audioBuffer.reduce((acc, buf) => acc + buf.length, 0);
+    const length = totalLength * numOfChan * 2 + 44;
+    const arrayBuffer = new ArrayBuffer(length);
+    const view = new DataView(arrayBuffer);
+
+    const writeString = (view: DataView, offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+
+    const floatTo16BitPCM = (view: DataView, offset: number, input: Float32Array) => {
+      for (let i = 0; i < input.length; i++, offset += 2) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        view.setInt16(offset, s < 0 ? s * 32768 : s * 32767, true);
+      }
+    };
+
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, length - 8, true);
+    writeString(view, 8, 'WAVE');
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numOfChan, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numOfChan * 2, true);
+    view.setUint16(32, numOfChan * 2, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeString(view, 36, 'data');
+    view.setUint32(40, length - 44, true);
+
+    const interleaved = new Float32Array(totalLength);
+    let offset = 0;
+    for (const buffer of audioBuffer) {
+      interleaved.set(buffer, offset);
+      offset += buffer.length;
+    }
+
+    floatTo16BitPCM(view, 44, interleaved);
+
+    return new Blob([view], { type: 'audio/wav' });
+  };
+
   const startRecording = async () => {
     try {
-      console.log('Начало записи аудио...');
+      console.log('Начало записи аудио (WAV)...');
 
-      if (mediaRecorderRef.current?.state === 'recording') {
-        mediaRecorderRef.current.stop();
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
       }
 
       audioChunksRef.current = [];
       setAudioData({ blob: null, url: null, duration: 0 });
       elapsedBeforePauseRef.current = 0;
+      currentTimeRef.current = 0;
+      isPausedRef.current = false;
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+      mediaStreamRef.current = stream;
       console.log('Микрофон доступен');
 
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({
+        sampleRate: sampleRate,
       });
+      audioContextRef.current = audioContext;
 
-      mediaRecorderRef.current = mediaRecorder;
+      const source = audioContext.createMediaStreamSource(stream);
+      sourceRef.current = source;
 
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-          console.log('Аудио-чанк получен, размер:', event.data.size);
-        }
+      const scriptProcessor = audioContext.createScriptProcessor(4096, channels, channels);
+      scriptProcessorRef.current = scriptProcessor;
+
+      scriptProcessor.onaudioprocess = (event) => {
+        if (isPausedRef.current) return;
+
+        const inputBuffer = event.inputBuffer;
+        const channelData = inputBuffer.getChannelData(0);
+        const buffer = new Float32Array(channelData.length);
+        buffer.set(channelData);
+        audioChunksRef.current.push(buffer);
+        console.log('Аудио-чанк WAV получен, размер:', buffer.length);
       };
 
-      mediaRecorder.onstop = async () => {
-        console.log('Запись остановлена');
+      source.connect(scriptProcessor);
+      scriptProcessor.connect(audioContext.destination);
 
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
-
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
-          streamRef.current = null;
-        }
-
-        if (audioChunksRef.current.length > 0) {
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          const audioUrl = URL.createObjectURL(audioBlob);
-
-          // Создаем аудио-элемент для определения длительности
-          const audio = new Audio(audioUrl);
-
-          // Устанавливаем разумный таймаут для загрузки метаданных
-          const timeoutPromise = new Promise<number>((resolve) => {
-            setTimeout(() => {
-              console.warn('Таймаут загрузки метаданных, используем recorded time');
-              resolve(currentTimeRef.current / 1000);
-            }, 1500);
-          });
-
-          // Загружаем метаданные
-          const metadataPromise = new Promise<number>((resolve) => {
-            audio.onloadedmetadata = () => {
-              let duration = audio.duration;
-
-              // Проверяем корректность длительности
-              if (!isFinite(duration) || isNaN(duration) || duration <= 0) {
-                console.warn('Некорректная длительность из метаданных, используем recorded time');
-                duration = currentTimeRef.current / 1000;
-              }
-
-              console.log('Длительность аудио:', duration);
-              resolve(duration);
-            };
-
-            audio.onerror = () => {
-              console.warn('Ошибка загрузки аудио, используем recorded time');
-              resolve(currentTimeRef.current / 1000);
-            };
-
-            audio.load();
-          });
-
-          // Ждем либо метаданные, либо таймаут
-          const duration = await Promise.race([metadataPromise, timeoutPromise]);
-
-          console.log('Аудио записано:', {
-            размер: audioBlob.size,
-            длительность: duration,
-            url: audioUrl
-          });
-
-          setAudioData({
-            blob: audioBlob,
-            url: audioUrl,
-            duration: duration,
-          });
-
-          // Очищаем аудио-элемент
-          audio.remove();
-        }
-      };
-
-      mediaRecorder.start(100);
       setIsRecording(true);
       setIsPaused(false);
 
@@ -159,7 +148,7 @@ export const useAudioRecorder = ({
         setRecordingTime(elapsed);
       }, 100);
 
-      console.log('Запись начата');
+      console.log('Запись WAV начата');
     } catch (error) {
       console.error('Ошибка при начале записи:', error);
       alert('Не удалось получить доступ к микрофону. Проверьте разрешения.');
@@ -167,11 +156,10 @@ export const useAudioRecorder = ({
   };
 
   const pauseRecording = () => {
-    if (mediaRecorderRef.current?.state === 'recording') {
+    if (isRecording && !isPaused) {
       console.log('Пауза записи');
-      mediaRecorderRef.current.pause();
+      isPausedRef.current = true;
       setIsPaused(true);
-
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -181,11 +169,10 @@ export const useAudioRecorder = ({
   };
 
   const resumeRecording = () => {
-    if (mediaRecorderRef.current?.state === 'paused') {
+    if (isRecording && isPaused) {
       console.log('Возобновление записи');
-      mediaRecorderRef.current.resume();
+      isPausedRef.current = false;
       setIsPaused(false);
-
       startTimeRef.current = Date.now() - elapsedBeforePauseRef.current;
       timerRef.current = setInterval(() => {
         const elapsed = Date.now() - startTimeRef.current;
@@ -198,18 +185,55 @@ export const useAudioRecorder = ({
   const stopRecording = () => {
     console.log('Остановка записи');
 
-    if (mediaRecorderRef.current &&
-        ['recording', 'paused'].includes(mediaRecorderRef.current.state)) {
-      mediaRecorderRef.current.stop();
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    if (scriptProcessorRef.current) {
+      scriptProcessorRef.current.disconnect();
+      scriptProcessorRef.current = null;
+    }
+
+    if (sourceRef.current) {
+      sourceRef.current.disconnect();
+      sourceRef.current = null;
+    }
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
     }
 
     setIsRecording(false);
     setIsPaused(false);
 
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
+    if (audioChunksRef.current.length > 0) {
+      const wavBlob = convertToWAV(audioChunksRef.current, sampleRate, channels);
+      const wavUrl = URL.createObjectURL(wavBlob);
+
+      const duration = currentTimeRef.current / 1000;
+
+      console.log('Аудио WAV записано:', {
+        размер: wavBlob.size,
+        длительность: duration,
+        url: wavUrl,
+        тип: 'audio/wav'
+      });
+
+      setAudioData({
+        blob: wavBlob,
+        url: wavUrl,
+        duration: duration,
+      });
     }
+
+    audioChunksRef.current = [];
   };
 
   const resetRecording = () => {
@@ -219,13 +243,10 @@ export const useAudioRecorder = ({
     setRecordingTime(0);
     elapsedBeforePauseRef.current = 0;
     currentTimeRef.current = 0;
-
     if (audioData.url) {
       URL.revokeObjectURL(audioData.url);
     }
   };
-
-  const currentTimeRef = useRef<number>(0);
 
   return {
     isRecording,
