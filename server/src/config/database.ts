@@ -10,8 +10,12 @@ if (!connectionString) {
   process.exit(1);
 }
 
-// Убираем ?sslmode=require из строки, чтобы не конфликтовало
-connectionString = connectionString.replace('?sslmode=require', '').replace('&sslmode=require', '');
+// SSL only when the URL explicitly requests it (Yandex Cloud / RDS).
+// Local PostgreSQL without SSL must NOT receive ssl:{} — it will reject the handshake.
+const needsSsl = connectionString.includes('sslmode=require');
+connectionString = connectionString
+  .replace('?sslmode=require', '')
+  .replace('&sslmode=require', '');
 
 console.log('🔌 Connecting to database...');
 
@@ -22,12 +26,9 @@ const pgp = pgPromise({
   }
 });
 
-// 🔥 КРИТИЧНО: создаём подключение с отключённой проверкой сертификата
 const db = pgp({
   connectionString,
-  ssl: {
-    rejectUnauthorized: false  // ← ОТКЛЮЧАЕТ ПРОВЕРКУ СЕРТИФИКАТА
-  }
+  ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}),
 });
 
 export async function checkDatabaseConnection(): Promise<boolean> {

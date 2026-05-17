@@ -129,10 +129,12 @@ export const uploadAudio = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'No audio file provided' });
     }
 
-    // Verify magic bytes: WAV starts with "RIFF"
+    // Verify WAV magic bytes: RIFF....WAVE
     const buf = req.file.buffer;
-    if (buf.length < 4 || buf.toString('ascii', 0, 4) !== 'RIFF') {
-      return res.status(400).json({ success: false, error: 'Invalid audio file format' });
+    if (buf.length < 12
+        || buf.toString('ascii', 0, 4) !== 'RIFF'
+        || buf.toString('ascii', 8, 12) !== 'WAVE') {
+      return res.status(400).json({ success: false, error: 'Invalid audio file format — WAV required' });
     }
 
     // IDOR: verify patient belongs to current user
@@ -203,10 +205,14 @@ export const uploadPhoto = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'No photo file provided' });
     }
 
-    // Verify magic bytes for JPEG (FF D8 FF) or PNG (89 50 4E 47)
+    // Verify magic bytes for JPEG (FF D8 FF) or PNG (89 50 4E 47 0D 0A 1A 0A)
     const buf = req.file.buffer;
+    if (buf.length < 8) {
+      return res.status(400).json({ success: false, error: 'File too small' });
+    }
     const isJpeg = buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
-    const isPng  = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47;
+    const isPng  = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47
+                && buf[4] === 0x0D && buf[5] === 0x0A && buf[6] === 0x1A && buf[7] === 0x0A;
     if (!isJpeg && !isPng) {
       return res.status(400).json({ success: false, error: 'Only JPEG and PNG images are allowed' });
     }
@@ -219,6 +225,8 @@ export const uploadPhoto = async (req: Request, res: Response) => {
     }
 
     const ext = isJpeg ? 'jpg' : 'png';
+    // Use server-detected MIME, never trust client-supplied mimetype
+    const detectedMime = isJpeg ? 'image/jpeg' : 'image/png';
     const fileName = `${patient_id}_photo_${Date.now()}.${ext}`;
     const s3Key = `photos/${fileName}`;
 
@@ -226,7 +234,7 @@ export const uploadPhoto = async (req: Request, res: Response) => {
       Bucket: PHOTO_BUCKET_NAME,
       Key: s3Key,
       Body: buf,
-      ContentType: req.file.mimetype,
+      ContentType: detectedMime,
       ContentDisposition: 'attachment',
       ACL: 'public-read',
     }));
