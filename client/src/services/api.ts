@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://bba8vah5ofa4lbqtm3sb.containers.yandexcloud.net/api';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -19,13 +19,15 @@ export interface PatientData {
   parkinsonism_stage?: string;
   comorbidities?: string;
   diagnosis?: string;
+  native_language?: string;
+  has_parkinsonism?: boolean;
+  has_cognitive?: boolean;
+  cog_motor_test?: string;
+  cog_motor_score?: string;
   moca_score?: string;
-  audio_config?: any;
-  audio_recordings?: any[];
-  mds_updrs?: any;
-  moca?: any;
-  diseases?: any[];
-  photos?: any[];
+  mmse_score?: string;
+  trch_score?: string;
+  updrs_score?: string;
 }
 
 export interface AudioUploadData {
@@ -40,143 +42,152 @@ export interface AudioUploadData {
   status?: string;
 }
 
+// When any response is 401 we fire this event; App listens and redirects to login.
+function on401(): void {
+  window.dispatchEvent(new CustomEvent('auth:expired'));
+}
+
+async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const response = await fetch(url, { credentials: 'include', ...options });
+  if (response.status === 401) on401();
+  return response;
+}
+
 export const api = {
   async createPatient(data: PatientData): Promise<ApiResponse> {
     try {
-      console.log('Отправка данных на сервер:', data);
-      const response = await fetch(API_BASE_URL + '/patients', {
+      const response = await apiFetch(`${API_BASE_URL}/patients`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(data),
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => {
-          return { error: 'HTTP error! status: ' + response.status };
-        });
-        throw new Error(errorData.error || 'HTTP error! status: ' + response.status);
-      }
-
       const result = await response.json();
-      console.log('Успешно сохранено:', result);
-      return { success: true, data: result };
+      return { success: response.ok, data: result, error: result.error };
     } catch (error) {
-      console.error('Ошибка сохранения:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   },
 
   async uploadAudio(data: AudioUploadData): Promise<ApiResponse> {
     try {
-      console.log('Загрузка аудио:', {
-        patient_id: data.patient_id,
-        recording_type: data.recording_type,
-        duration: data.duration,
-        size: data.audio instanceof Blob ? data.audio.size : 'N/A'
-      });
-
       const formData = new FormData();
       formData.append('patient_id', data.patient_id);
       formData.append('recording_type', data.recording_type);
       formData.append('recording_label', data.recording_label || data.recording_type);
-      formData.append('audio', data.audio, data.recording_type + '.wav');
+      formData.append('audio', data.audio, `${data.recording_type}.wav`);
       formData.append('duration', String(data.duration));
       formData.append('sample_rate', String(data.sample_rate || 48000));
       formData.append('bits_per_sample', String(data.bits_per_sample || 16));
       formData.append('channels', String(data.channels || 1));
       formData.append('status', data.status || 'completed');
 
-      const response = await fetch(API_BASE_URL + '/patients/upload-audio', {
+      const response = await apiFetch(`${API_BASE_URL}/patients/upload-audio`, {
         method: 'POST',
         body: formData,
       });
-
-      const responseText = await response.text();
-      console.log('Ответ сервера:', response.status, responseText);
-
-      if (!response.ok) {
-        let errorData;
-        try {
-          errorData = JSON.parse(responseText);
-        } catch {
-          errorData = { error: 'HTTP error! status: ' + response.status };
-        }
-        throw new Error(errorData.error || 'HTTP error! status: ' + response.status);
-      }
-
-      let result;
-      try {
-        result = JSON.parse(responseText);
-      } catch {
-        result = { success: true };
-      }
-
-      console.log('Аудио загружено:', result);
-      return { success: true, data: result };
+      const result = await response.json();
+      return { success: response.ok, data: result, error: result.error };
     } catch (error) {
-      console.error('Ошибка загрузки аудио:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   },
 
   async getPatients(): Promise<ApiResponse> {
     try {
-      const response = await fetch(API_BASE_URL + '/patients');
-      if (!response.ok) {
-        throw new Error('HTTP error! status: ' + response.status);
-      }
+      const response = await apiFetch(`${API_BASE_URL}/patients`);
       const result = await response.json();
-      console.log('Получены пациенты:', result);
-      return { success: true, data: result };
+      return { success: response.ok, data: result };
     } catch (error) {
-      console.error('API Error:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   },
 
   async getPatientById(id: string): Promise<ApiResponse> {
     try {
-      const response = await fetch(API_BASE_URL + '/patients/' + id);
-      if (!response.ok) {
-        throw new Error('HTTP error! status: ' + response.status);
-      }
+      const response = await apiFetch(`${API_BASE_URL}/patients/${encodeURIComponent(id)}`);
       const result = await response.json();
-      return { success: true, data: result };
+      return { success: response.ok, data: result };
     } catch (error) {
-      console.error('API Error:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   },
 
   async searchPatients(query: string): Promise<ApiResponse> {
     try {
-      const response = await fetch(API_BASE_URL + '/patients/search?q=' + encodeURIComponent(query));
-      if (!response.ok) {
-        throw new Error('HTTP error! status: ' + response.status);
-      }
+      const response = await apiFetch(`${API_BASE_URL}/patients/search?q=${encodeURIComponent(query)}`);
       const result = await response.json();
-      return { success: true, data: result };
+      return { success: response.ok, data: result };
     } catch (error) {
-      console.error('API Error:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  },
+
+  async deletePhoto(photoId: string): Promise<ApiResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/patients/photos/${encodeURIComponent(photoId)}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      return { success: response.ok, data: result };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  },
+
+  async saveConsent(patientId: string, data: {
+    consent_hash: string;
+    text_version: string;
+    check1: boolean;
+    check2: boolean;
+    signature_url?: string;
+  }): Promise<ApiResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/patients/${encodeURIComponent(patientId)}/consent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await response.json();
+      return { success: response.ok, data: result, error: result.error };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  },
+
+  async submitCase(patientId: string): Promise<ApiResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/patients/${encodeURIComponent(patientId)}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const result = await response.json();
+      return { success: response.ok, data: result, error: result.error };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  },
+
+  async getTodayStats(): Promise<ApiResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/patients/today-stats`);
+      const result = await response.json();
+      return { success: response.ok, data: result };
+    } catch {
+      return { success: true, data: { data: { stats: { accepted: 0, rejected: 0, review: 0, total: 0 } } } };
+    }
+  },
+
+  async reviewCase(patientId: string, status: 'ACCEPTED' | 'REJECTED' | 'REVIEW', rejection_code?: string, rejection_note?: string): Promise<ApiResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/patients/${encodeURIComponent(patientId)}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, rejection_code, rejection_note }),
+      });
+      const result = await response.json();
+      return { success: response.ok, data: result, error: result.error };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   },
 };

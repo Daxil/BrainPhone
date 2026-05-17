@@ -1,0 +1,184 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Run unit tests
+        working-directory: server
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://placeholder/placeholder
+          TOTP_ENCRYPTION_KEY: ${{ secrets.TOTP_ENCRYPTION_KEY || 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' }}
+        run: npm run test:unit
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Run migrations
+        working-directory: server
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5433/test_db
+          TOTP_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          NODE_ENV: test
+        run: npx ts-node src/scripts/migrate.ts
+
+      - name: Run integration tests
+        working-directory: server
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://test:test@localhost:5433/test_db
+          REDIS_URL: redis://localhost:6380
+          TOTP_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+        run: npm run test:integration -- --forceExit
+
+  security-scan:
+    name: ZAP Security Scan
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: brainphone
+          POSTGRES_PASSWORD: brainphone
+          POSTGRES_DB: brainphone
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install and build
+        run: |
+          cd server && npm ci && npm run build
+
+      - name: Run migrations
+        working-directory: server
+        env:
+          DATABASE_URL: postgresql://brainphone:brainphone@localhost:5432/brainphone
+          TOTP_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          NODE_ENV: production
+        run: npx ts-node src/scripts/migrate.ts
+
+      - name: Start server
+        working-directory: server
+        env:
+          DATABASE_URL: postgresql://brainphone:brainphone@localhost:5432/brainphone
+          TOTP_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          NODE_ENV: production
+          PORT: 3001
+        run: node dist/app.js &
+        # Wait for server
+      - run: sleep 5 && curl -f http://localhost:3001/health
+
+      - name: Run ZAP baseline scan
+        run: |
+          mkdir -p zap-report
+          docker run --rm \
+            --network host \
+            -v ${{ github.workspace }}/zap-report:/zap/wrk/:rw \
+            -v ${{ github.workspace }}/zap.conf:/zap/zap.conf:ro \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+              -t http://localhost:3001 \
+              -r zap-report.html \
+              -J zap-report.json \
+              -l WARN \
+              -c /zap/zap.conf \
+            || echo "ZAP_EXIT=$?" >> $GITHUB_ENV
+
+      - name: Check for Medium+ findings
+        run: |
+          python3 - zap-report/zap-report.json <<'EOF'
+          import sys, json, os
+          with open(sys.argv[1]) as f:
+              data = json.load(f)
+          alerts = data.get('site', [{}])[0].get('alerts', [])
+          risk_map = {'High': 3, 'Medium': 2, 'Low': 1, 'Informational': 0}
+          bad = [a for a in alerts if risk_map.get(a.get('riskdesc','').split()[0], 0) >= 2]
+          if bad:
+              for a in bad:
+                  print(f"[{a.get('riskdesc')}] {a.get('name')}")
+              sys.exit(2)
+          print("No Medium+ findings.")
+          EOF
+
+      - name: Upload ZAP report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-report
+          path: zap-report/

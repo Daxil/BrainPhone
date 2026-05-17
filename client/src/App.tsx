@@ -4,164 +4,205 @@ import { useAudioRecorder } from './hooks/useAudioRecorder';
 import { formatTime, formatFileSize, generatePatientId } from './utils/dataUtils';
 import type { PatientRecord, ProtocolType, Screen } from './types';
 import type { AudioRecording } from './types/forms';
+import type { CaseTask, CaseFlowState, ConsentData } from './types/case';
+
+// Screens
 import HomeScreen from './components/screens/HomeScreen';
 import CaptureScreen from './components/screens/CaptureScreen';
 import FormScreen from './components/screens/FormScreen';
 import ProcessingScreen from './components/screens/ProcessingScreen';
 import ResultsScreen from './components/screens/ResultsScreen';
 import ViewScreen from './components/screens/ViewScreen';
-import AssessmentsScreen from './components/screens/AssessmentsScreen';
 import ProtocolSelectScreen from './components/screens/ProtocolSelectScreen';
+import AssessmentsScreen from './components/screens/AssessmentsScreen';
+import SplashScreen from './components/screens/SplashScreen';
+import OnboardingScreen from './components/screens/OnboardingScreen';
+import ConsentScreen from './components/screens/ConsentScreen';
+import TaskListScreen from './components/screens/TaskListScreen';
+import RecordingScreen from './components/screens/RecordingScreen';
+import ReadyToSubmitScreen from './components/screens/ReadyToSubmitScreen';
+import CaseResultScreen from './components/screens/CaseResultScreen';
+import MyCasesScreen from './components/screens/MyCasesScreen';
+import SupportScreen from './components/screens/SupportScreen';
+import OfflineBanner from './components/common/OfflineBanner';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+// Services & constants
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import LoginPage from './pages/LoginPage';
+import TotpPage from './pages/TotpPage';
+import InvitePage from './pages/InvitePage';
+import SetupTotpPage from './pages/SetupTotpPage';
+import AdminPage from './pages/AdminPage';
+import { ONBOARDING_KEY, PROTOCOL_TASKS } from './constants/statuses';
+import { enqueue, startQueueProcessor } from './services/offlineQueue';
 
-interface PendingUpload {
-  id: string;
-  patient_id: string;
-  recording_type: string;
-  recording_label: string;
-  file_path: string;
-  duration: number;
-  status: 'pending' | 'uploading' | 'completed' | 'failed';
-  retry_count: number;
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://bba8vah5ofa4lbqtm3sb.containers.yandexcloud.net/api';
+
+// ─── Detect special URLs handled outside the main SPA ─────────────────────────
+
+function getInviteToken(): string | null {
+  const match = window.location.pathname.match(/^\/invite\/([^/]+)/);
+  return match ? match[1] : null;
 }
 
-class YandexDiskSyncService {
-  private pendingQueue: PendingUpload[] = [];
-  private isOnline: boolean = typeof navigator !== 'undefined' ? navigator.onLine : true;
-  private isSyncing: boolean = false;
-
-  constructor() {
-    if (typeof window !== 'undefined') {
-      this.initNetworkListener();
-      this.loadPendingQueue();
-    }
-  }
-
-  private initNetworkListener() {
-    window.addEventListener('online', () => {
-      console.log('Сеть доступна, начинаю синхронизацию...');
-      this.isOnline = true;
-      this.syncPendingUploads();
-    });
-
-    window.addEventListener('offline', () => {
-      console.log('Сеть недоступна, откладываю синхронизацию');
-      this.isOnline = false;
-    });
-  }
-
-  private loadPendingQueue() {
-    const stored = localStorage.getItem('yandex_pending_uploads');
-    if (stored) {
-      try {
-        this.pendingQueue = JSON.parse(stored);
-        console.log('Загружено отложенных загрузок:', this.pendingQueue.length);
-        if (this.isOnline) {
-          this.syncPendingUploads();
-        }
-      } catch (e) {
-        console.error('Ошибка загрузки очереди:', e);
-        this.pendingQueue = [];
-      }
-    }
-  }
-
-  private savePendingQueue() {
-    localStorage.setItem('yandex_pending_uploads', JSON.stringify(this.pendingQueue));
-  }
-
-  public addPendingUpload(upload: PendingUpload) {
-    console.log('Добавлено в очередь:', upload);
-    this.pendingQueue.push(upload);
-    this.savePendingQueue();
-    if (this.isOnline && !this.isSyncing) {
-      this.syncPendingUploads();
-    }
-  }
-
-  public async syncPendingUploads() {
-    if (!this.isOnline || this.isSyncing || this.pendingQueue.length === 0) {
-      return;
-    }
-
-    this.isSyncing = true;
-    console.log('Начало синхронизации:', this.pendingQueue.length, 'файлов');
-
-    const pending = this.pendingQueue.filter(function(u: PendingUpload) {
-      return u.status === 'pending';
-    });
-
-    for (let i = 0; i < pending.length; i++) {
-      const upload = pending[i];
-      try {
-        upload.status = 'uploading';
-        this.savePendingQueue();
-
-        console.log('Загрузка на Яндекс.Диск:', upload.recording_type);
-
-        const response = await fetch(API_BASE_URL + '/patients/sync-yandex', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            patient_id: upload.patient_id,
-            recording_type: upload.recording_type,
-            recording_label: upload.recording_label,
-            duration: upload.duration,
-          }),
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-          upload.status = 'completed';
-          console.log('Загружено на Яндекс.Диск:', upload.recording_type);
-        } else {
-          upload.status = 'pending';
-          upload.retry_count = (upload.retry_count || 0) + 1;
-          console.warn('Не удалось загрузить:', upload.recording_type, 'Попытка:', upload.retry_count);
-        }
-
-        this.savePendingQueue();
-      } catch (error) {
-        upload.status = 'pending';
-        upload.retry_count = (upload.retry_count || 0) + 1;
-        console.error('Ошибка синхронизации:', upload.recording_type, error);
-        this.savePendingQueue();
-      }
-
-      await new Promise(function(resolve) {
-        return setTimeout(resolve, 500);
-      });
-    }
-
-    this.pendingQueue = this.pendingQueue.filter(function(u: PendingUpload) {
-      return u.status !== 'completed';
-    });
-    this.savePendingQueue();
-    this.isSyncing = false;
-
-    console.log('Синхронизация завершена');
-  }
-
-  public getPendingCount(): number {
-    return this.pendingQueue.filter(function(u: PendingUpload) {
-      return u.status === 'pending';
-    }).length;
-  }
+function isAdminPath(): boolean {
+  return window.location.pathname.startsWith('/admin');
 }
 
-const yandexDiskSync = new YandexDiskSyncService();
+// ─── Auth gate wrapper ────────────────────────────────────────────────────────
 
-function App() {
+type AuthScreen = 'splash' | 'login' | 'totp' | 'setup-totp' | 'onboarding' | 'app' | 'admin' | 'invite';
+
+function AppWithAuth() {
+  const { user, loading, logout } = useAuth();
+  const inviteToken = getInviteToken();
+
+  const [authScreen, setAuthScreen] = useState<AuthScreen>('splash');
+  const [splashDone, setSplashDone]   = useState(false);
+  const [isOffline,  setIsOffline]    = useState(!navigator.onLine);
+
+  const hasOnboarding = (userId: string) =>
+    localStorage.getItem(ONBOARDING_KEY(userId)) === 'done';
+
+  const markOnboarding = (userId: string) =>
+    localStorage.setItem(ONBOARDING_KEY(userId), 'done');
+
+  const resolveAuthScreen = (): AuthScreen => {
+    if (inviteToken) return 'invite';
+    if (!user)       return 'login';
+    if (user.role === 'admin' && isAdminPath()) return 'admin';
+    if (!hasOnboarding(user.id)) return 'onboarding';
+    return 'app';
+  };
+
+  const handleSplashComplete = (offline: boolean) => {
+    setIsOffline(offline);
+    setSplashDone(true);
+  };
+
+  useEffect(() => {
+    if (!splashDone || loading) return;
+    setAuthScreen(resolveAuthScreen());
+  }, [splashDone, loading, user]);
+
+  // Global 401 handler: any API call that gets "authentication required"
+  // fires auth:expired → we log out and redirect to login.
+  useEffect(() => {
+    const handle = () => {
+      logout().catch(() => {});
+    };
+    window.addEventListener('auth:expired', handle);
+    return () => window.removeEventListener('auth:expired', handle);
+  }, [logout]);
+
+  // Session keepalive: ping /api/auth/me every 10 minutes while the tab is visible
+  // so the server's 30-min idle TTL never expires during active use.
+  useEffect(() => {
+    if (!user) return;
+    const BASE = import.meta.env.VITE_API_URL || 'https://bba8vah5ofa4lbqtm3sb.containers.yandexcloud.net/api';
+    const ping = () => {
+      if (document.visibilityState === 'visible') {
+        fetch(`${BASE}/auth/me`, { credentials: 'include' }).catch(() => {});
+      }
+    };
+    const id = setInterval(ping, 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [user]);
+
+  // Экран-заставка
+  if (authScreen === 'splash') {
+    return <SplashScreen onComplete={handleSplashComplete} />;
+  }
+
+  // Инвайт — всегда показываем независимо от авторизации
+  if (authScreen === 'invite' && inviteToken) {
+    return (
+      <InvitePage
+        token={inviteToken}
+        onComplete={() => {
+          window.history.replaceState(null, '', '/');
+          setAuthScreen('login');
+        }}
+      />
+    );
+  }
+
+  // Не авторизован
+  if (!user) {
+    if (authScreen === 'totp') {
+      return (
+        <TotpPage onSuccess={() => {
+          setAuthScreen(isAdminPath() ? 'admin' : (user && !hasOnboarding((user as any).id) ? 'onboarding' : 'app'));
+        }} />
+      );
+    }
+    return (
+      <LoginPage
+        onSuccess={() => setAuthScreen(isAdminPath() ? 'admin' : 'app')}
+        onRequireTotp={() => setAuthScreen('totp')}
+      />
+    );
+  }
+
+  // Админ: обязательная настройка TOTP
+  if (user.role === 'admin' && user.totpEnabled && !user.totpVerified) {
+    return (
+      <SetupTotpPage
+        mandatory
+        onComplete={() => setAuthScreen('admin')}
+      />
+    );
+  }
+
+  // Онбординг (первый вход)
+  if (authScreen === 'onboarding') {
+    return (
+      <OnboardingScreen
+        onComplete={() => {
+          markOnboarding(user.id);
+          setAuthScreen(user.role === 'admin' && isAdminPath() ? 'admin' : 'app');
+        }}
+      />
+    );
+  }
+
+  // Панель администратора
+  if (authScreen === 'admin' || (user.role === 'admin' && isAdminPath())) {
+    return (
+      <AdminPage onBack={() => { window.history.pushState(null, '', '/'); setAuthScreen('app'); }} />
+    );
+  }
+
+  return (
+    <MainApp
+      isOffline={isOffline}
+      onGoAdmin={() => { window.history.pushState(null, '', '/admin'); setAuthScreen('admin'); }}
+      onLogout={async () => { await logout(); setAuthScreen('login'); }}
+    />
+  );
+}
+
+// ─── Main application (only rendered when authenticated) ──────────────────────
+
+function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: () => void; isOffline: boolean }) {
+  const { user } = useAuth();
   const [screen, setScreen] = useState<Screen>('home');
   const [currentRecord, setCurrentRecord] = useState<PatientRecord | null>(null);
   const [selectedProtocol, setSelectedProtocol] = useState<ProtocolType | null>(null);
   const [audioRecordings, setAudioRecordings] = useState<AudioRecording[]>([]);
   const [currentRecordingId, setCurrentRecordingId] = useState<string | null>(null);
+  const [pendingSaveId, setPendingSaveId] = useState<string | null>(null);
   const [patients, setPatients] = useState<PatientRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // ── Новый флоу (E4–E11) ───────────────────────────────────────────────────
+  const [caseFlow, setCaseFlow] = useState<CaseFlowState | null>(null);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [finalCaseStatus, setFinalCaseStatus] = useState<string>('SUBMITTED');
+  const [finalCaseNumber, setFinalCaseNumber] = useState<string | undefined>(undefined);
+  const [finalRejectionCode, setFinalRejectionCode] = useState<string | undefined>(undefined);
 
   const {
     isRecording,
@@ -173,69 +214,56 @@ function App() {
     resumeRecording,
     stopRecording,
     resetRecording,
-  } = useAudioRecorder({
-    sampleRate: 48000,
-    bitsPerSample: 16,
-    channels: 1,
-  });
+  } = useAudioRecorder({ sampleRate: 48000, bitsPerSample: 16, channels: 1 });
 
+  // Старт процессора офлайн-очереди
   useEffect(() => {
-    console.log('Проверка отложенных загрузок...');
-    yandexDiskSync.syncPendingUploads();
+    const stop = startQueueProcessor(async (patientId) => {
+      const r = await api.submitCase(patientId);
+      return r.success;
+    });
+    return stop;
   }, []);
 
   useEffect(() => {
     const loadPatients = async () => {
       try {
         setLoading(true);
-        console.log('Загрузка пациентов...');
         const result = await api.getPatients();
-        console.log('Результат:', result);
-
         if (result.success && result.data?.data?.patients) {
-          console.log('Пациенты найдены:', result.data.data.patients.length);
-          const formatted = result.data.data.patients.map(function(p: any) {
-            return {
-              id: p.id,
-              patientName: p.patient_name,
-              age: p.age,
-              gender: p.gender,
-              chiefComplaint: p.chief_complaint,
-              notes: p.notes || '',
-              protocolType: p.protocol_type,
-              vitals: {
-                bloodPressure: p.blood_pressure || '',
-                heartRate: p.heart_rate || '',
-                temperature: p.temperature || '',
-              },
-              photos: p.photos?.map(function(ph: any) {
-                return { url: ph.file_path, file: null };
-              }) || [],
-              audioRecordings: p.audio_files?.map(function(af: any) {
-                return {
-                  id: af.recording_type,
-                  type: af.recording_type,
-                  label: af.recording_label,
-                  url: af.yandex_disk_url || ('http://localhost:3001' + af.file_path),
-                  duration: af.duration,
-                  status: 'completed',
-                  recordedAt: af.uploaded_at,
-                };
-              }) || [],
-              mdsUpdrs: p.mds_updrs,
-              moca: p.moca,
-              createdAt: p.created_at,
-              updatedAt: p.updated_at,
-            };
-          });
-          console.log('Отформатированные пациенты:', formatted);
+          const formatted = result.data.data.patients.map((p: any) => ({
+            id: p.id,
+            patientName: p.patient_name,
+            age: p.age,
+            gender: p.gender,
+            chiefComplaint: p.chief_complaint,
+            notes: p.notes || '',
+            protocolType: p.protocol_type,
+            vitals: {
+              bloodPressure: p.blood_pressure || '',
+              heartRate: p.heart_rate || '',
+              temperature: p.temperature || '',
+            },
+            photos: p.photos?.map((ph: any) => ({ url: ph.yandex_disk_url || ph.file_path, file: null, id: String(ph.id) })) || [],
+            audioRecordings: p.audio_files?.map((af: any) => ({
+              id: af.recording_type || af.id,
+              type: af.recording_type || 'unknown',
+              label: af.recording_label || af.recording_type || 'Без названия',
+              url: af.yandex_disk_url || af.url,
+              duration: af.duration || 0,
+              status: 'completed' as const,
+              recordedAt: af.uploaded_at || af.created_at,
+            })) || [],
+            mdsUpdrs: p.mds_updrs,
+            moca: p.moca,
+            createdAt: p.created_at,
+            updatedAt: p.updated_at,
+          }));
           setPatients(formatted);
         } else {
-          console.log('Пациенты не найдены или ошибка в структуре ответа');
           setPatients([]);
         }
-      } catch (err) {
-        console.error('Failed to load patients:', err);
+      } catch {
         setPatients([]);
       } finally {
         setLoading(false);
@@ -247,7 +275,7 @@ function App() {
   const handleBack = () => {
     if (screen === 'capture') {
       setScreen('protocolSelect');
-    } else if (screen === 'form' || screen === 'capture' || screen === 'processing' || screen === 'results') {
+    } else if (screen === 'form' || screen === 'processing' || screen === 'results') {
       setScreen('home');
       setCurrentRecord(null);
       setAudioRecordings([]);
@@ -257,9 +285,7 @@ function App() {
     }
   };
 
-  const handleNewPatient = () => {
-    setScreen('protocolSelect');
-  };
+  const handleNewPatient = () => setScreen('protocolSelect');
 
   const handleProtocolSelect = (protocol: ProtocolType) => {
     setSelectedProtocol(protocol);
@@ -270,332 +296,340 @@ function App() {
       gender: 'male',
       chiefComplaint: '',
       notes: '',
-      vitals: {
-        bloodPressure: '',
-        heartRate: '',
-        temperature: '',
-      },
+      vitals: { bloodPressure: '', heartRate: '', temperature: '' },
       photos: [],
       protocolType: protocol,
     };
     setCurrentRecord(newRecord);
+    setCaseFlow(null);
     setScreen('form');
   };
 
-  const handleSelectPatient = async (id: string) => {
-    const result = await api.getPatientById(id);
-    if (result.success && result.data?.data) {
-      const data = result.data.data;
-      const patient = data.patient || data;
-      const record: PatientRecord = {
-        id: patient.id,
-        patientName: patient.patient_name,
-        age: patient.age,
-        gender: patient.gender,
-        chiefComplaint: patient.chief_complaint,
-        notes: patient.notes || '',
-        vitals: {
-          bloodPressure: patient.blood_pressure || '',
-          heartRate: patient.heart_rate || '',
-          temperature: patient.temperature || '',
-        },
-        protocolType: patient.protocol_type as ProtocolType,
-        parkinsonismStage: patient.parkinsonism_stage,
-        comorbidities: patient.comorbidities,
-        diagnosis: patient.diagnosis,
-        mocaScore: patient.moca_score,
-        photos: data.photos?.map(function(p: any) {
-          return { url: p.file_path, file: null };
-        }) || [],
-        audioRecordings: data.audio_files?.map(function(af: any) {
-          return {
-            id: af.recording_type,
-            type: af.recording_type,
-            label: af.recording_label,
-            url: af.yandex_disk_url || ('http://localhost:3001' + af.file_path),
-            duration: af.duration,
-            status: 'completed',
-            recordedAt: af.uploaded_at,
-          };
-        }) || [],
-        mdsUpdrs: patient.mds_updrs,
-        moca: patient.moca,
-        createdAt: patient.created_at,
-        updatedAt: patient.updated_at,
-      };
-      setCurrentRecord(record);
-      setAudioRecordings(record.audioRecordings || []);
-      setScreen('view');
+  // ── Добавить фото локально (без API) — вызывается из FormScreen ─────────
+  const handleAddPhotoLocal = (file: File, category: 'consult' | 'scale') => {
+    const localUrl = URL.createObjectURL(file);
+    setCurrentRecord(prev => prev ? {
+      ...prev, photos: [...prev.photos, { url: localUrl, file, category }],
+    } : null);
+  };
+
+  // ── Загрузить локальные фото на сервер после создания пациента ───────────
+  const uploadPendingPhotos = async (patientId: string, photos: PatientRecord['photos']) => {
+    for (const photo of photos) {
+      if (!photo.file) continue; // уже загружено
+      const formData = new FormData();
+      formData.append('patient_id', patientId);
+      formData.append('photo', photo.file);
+      if (photo.category) formData.append('category', photo.category);
+      try {
+        await fetch(`${API_BASE_URL}/patients/upload-photo`, {
+          method: 'POST', credentials: 'include', body: formData,
+        });
+      } catch { /* не блокируем флоу */ }
     }
   };
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ── Новый флоу: форма → согласие → список заданий ────────────────────────
+  const handleFormContinue = async () => {
+    if (!currentRecord || !selectedProtocol) return;
+    const patientData = {
+      patient_name:     currentRecord.patientName || 'Пациент',
+      age:              currentRecord.age || '0',
+      gender:           currentRecord.gender || 'male',
+      chief_complaint:  currentRecord.diagnosis || currentRecord.chiefComplaint || '',
+      notes:            currentRecord.notes || '',
+      protocol_type:    selectedProtocol,
+      diagnosis:        currentRecord.diagnosis,
+      native_language:  currentRecord.nativeLanguage,
+      has_parkinsonism: currentRecord.hasParkinsonism,
+      has_cognitive:    currentRecord.hasCognitive,
+      moca_score:       currentRecord.mocaScore,
+      mmse_score:       currentRecord.mmseScore,
+      trch_score:       currentRecord.trchScore,
+      updrs_score:      currentRecord.updrsScore,
+    };
+    const result = await api.createPatient(patientData);
+    if (result.success && result.data?.data?.patient) {
+      const saved = result.data.data.patient;
+      if (currentRecord.photos.length > 0) {
+        uploadPendingPhotos(saved.id, currentRecord.photos).catch(() => {});
+      }
+      setCurrentRecord(prev => prev ? { ...prev, id: saved.id } : null);
+      const taskDefs = PROTOCOL_TASKS[selectedProtocol];
+      const tasks: CaseTask[] = taskDefs.map(def => ({
+        id:       def.fileCode,
+        taskType: def.taskType,
+        label:    def.label,
+        fileCode: def.fileCode,
+        required: def.required,
+        status:   'NOT_RECORDED' as const,
+      }));
+      setCaseFlow({
+        patientId:    saved.id,
+        protocol:     selectedProtocol,
+        caseStatus:   'CONSENT_PENDING',
+        consent:      null,
+        tasks,
+        activeTaskId: null,
+      });
+      setScreen('consent');
+    } else {
+      const errDetail = result.error || result.data?.error || 'неизвестная ошибка';
+      alert(`Не удалось сохранить данные пациента\n\n${errDetail}`);
+    }
+  };
+
+  const handleConsentConfirmed = async (consent: ConsentData) => {
+    if (!caseFlow) return;
+    // Сохраняем на сервере
+    await api.saveConsent(caseFlow.patientId, {
+      consent_hash:   consent.hash,
+      text_version:   consent.textVersion,
+      check1:         consent.check1,
+      check2:         consent.check2,
+      signature_url:  consent.signatureDataUrl,
+    }).catch(() => {/* не блокируем, сохранено локально в caseFlow */});
+    setCaseFlow(prev => prev ? { ...prev, consent, caseStatus: 'RECORDING' } : null);
+    setScreen('taskList');
+  };
+
+  const handleRecordTask = (taskId: string) => {
+    setActiveTaskId(taskId);
+    setScreen('recording');
+  };
+
+  const handleSkipTask = (taskId: string, reason: string) => {
+    setCaseFlow(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        tasks: prev.tasks.map(t => t.id === taskId
+          ? { ...t, status: 'SKIPPED' as const, skipReason: reason }
+          : t),
+      };
+    });
+  };
+
+  const handleTaskSaved = async (task: CaseTask, blob: Blob, duration: number, qcResult: any) => {
+    if (!caseFlow) throw new Error('No case flow');
+    // Загружаем аудио на сервер
+    const result = await api.uploadAudio({
+      patient_id:      caseFlow.patientId,
+      recording_type:  task.fileCode,
+      recording_label: task.label,
+      audio:           blob,
+      duration,
+      sample_rate:     48000,
+      bits_per_sample: 16,
+      channels:        1,
+      status:          qcResult.passed ? 'completed' : 'qc_warning',
+    });
+    if (!result.success) throw new Error(result.error || 'Upload failed');
+    const uploadedUrl = result.data?.data?.audio?.yandex_disk_url;
+    setCaseFlow(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        tasks: prev.tasks.map(t => t.id === task.id ? {
+          ...t,
+          status:      'RECORDED_LOCAL' as const,
+          duration,
+          uploadedUrl,
+          qcResult,
+          audioBlob:   undefined, // удаляем blob после успешной загрузки
+        } : t),
+      };
+    });
+    setScreen('taskList');
+  };
+
+  const handleSubmitCase = async () => {
+    if (!caseFlow) return;
+    if (isOffline) {
+      enqueue(caseFlow.patientId);
+      setCaseFlow(prev => prev ? { ...prev, caseStatus: 'SUBMITTED' } : null);
+      setFinalCaseStatus('SUBMITTED');
+      setScreen('caseResult');
+      return;
+    }
+    const result = await api.submitCase(caseFlow.patientId);
+    if (result.success) {
+      const cn  = result.data?.data?.caseNumber;
+      const st  = result.data?.data?.caseStatus || 'SUBMITTED';
+      setFinalCaseStatus(st);
+      setFinalCaseNumber(cn);
+      setFinalRejectionCode(undefined);
+      setCaseFlow(prev => prev ? { ...prev, caseStatus: 'SUBMITTED' } : null);
+      // Обновляем список пациентов
+      setPatients(prev => prev.map(p => p.id === caseFlow.patientId
+        ? { ...p, caseStatus: st, caseNumber: cn }
+        : p));
+      setScreen('caseResult');
+    } else {
+      throw new Error(result.error || 'Submit failed');
+    }
+  };
+
+  const handleNewCaseFromResult = () => {
+    setCaseFlow(null);
+    setCurrentRecord(null);
+    setSelectedProtocol(null);
+    setScreen('protocolSelect');
+  };
+
+  const handleGoHomeFromResult = () => {
+    setCaseFlow(null);
+    setCurrentRecord(null);
+    setSelectedProtocol(null);
+    setScreen('home');
+  };
+
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !currentRecord) return;
     const files = Array.from(e.target.files);
-    const newPhotos = files.map(function(file) {
-      return {
-        url: URL.createObjectURL(file),
-        file: file,
-      };
-    });
-    setCurrentRecord(function(prev) {
-      if (!prev) return null;
-      return {
-        ...prev,
-        photos: [...prev.photos, ...newPhotos],
-      };
-    });
-  };
+    if (fileInputRef.current) fileInputRef.current.value = '';
 
-  const handleRemovePhoto = (index: number) => {
-    setCurrentRecord(function(prev) {
-      if (!prev) return null;
-      const photo = prev.photos[index];
-      if (photo?.url?.startsWith('blob:')) {
-        URL.revokeObjectURL(photo.url);
+    for (const file of files) {
+      const localUrl = URL.createObjectURL(file);
+      setCurrentRecord((prev) => prev ? { ...prev, photos: [...prev.photos, { url: localUrl, file }] } : null);
+
+      const formData = new FormData();
+      formData.append('patient_id', currentRecord.id);
+      formData.append('photo', file);
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/patients/upload-photo`, {
+          method: 'POST',
+          credentials: 'include',
+          body: formData,
+        });
+        const result = await response.json();
+        if (result.success) {
+          const s3Url = result.data?.photo?.yandex_disk_url;
+          const photoId = result.data?.photo?.id != null ? String(result.data.photo.id) : undefined;
+          setCurrentRecord((prev) => {
+            if (!prev) return null;
+            if (!prev.photos.some((p) => p.url === localUrl)) {
+              if (photoId) api.deletePhoto(photoId).catch(console.error);
+              return prev;
+            }
+            return { ...prev, photos: prev.photos.map((p) => p.url === localUrl ? { url: s3Url || localUrl, file: null, id: photoId } : p) };
+          });
+          if (s3Url) URL.revokeObjectURL(localUrl);
+        } else {
+          setCurrentRecord((prev) => prev ? { ...prev, photos: prev.photos.filter((p) => p.url !== localUrl) } : null);
+          URL.revokeObjectURL(localUrl);
+        }
+      } catch {
+        setCurrentRecord((prev) => prev ? { ...prev, photos: prev.photos.filter((p) => p.url !== localUrl) } : null);
+        URL.revokeObjectURL(localUrl);
       }
-      return {
-        ...prev,
-        photos: prev.photos.filter(function(_: any, i: number) {
-          return i !== index;
-        }),
-      };
+    }
+  };
+
+  const handleRemovePhoto = async (index: number) => {
+    const photo = currentRecord?.photos[index];
+    if (photo?.id) {
+      await api.deletePhoto(photo.id).catch(() => {});
+    }
+    setCurrentRecord((prev) => {
+      if (!prev) return null;
+      if (photo?.url && photo.file) URL.revokeObjectURL(photo.url);
+      return { ...prev, photos: prev.photos.filter((_, i) => i !== index) };
     });
   };
 
-  const handleStartRecording = () => {
-    resetRecording();
-    startRecording();
-  };
+  const handleStartRecording = () => { setPendingSaveId(currentRecordingId); resetRecording(); startRecording(); };
+  const handleStopRecording  = () => { setPendingSaveId(currentRecordingId); stopRecording(); };
 
-  const handleStopRecording = () => {
-    stopRecording();
-  };
-
-  const handleSaveRecording = async (
-    recordingId: string,
-    data: { blob: Blob; url: string; duration: number }
-  ) => {
-    console.log('handleSaveRecording вызван:', { recordingId, duration: data.duration });
-
-    if (!currentRecord?.id || !currentRecord.id.startsWith('PAT-') || !data?.blob) {
-      console.error('Missing valid patient ID or audio data:', {
-        currentRecordId: currentRecord?.id,
-        hasBlob: !!data?.blob
-      });
-      throw new Error('Invalid patient ID or missing audio data');
-    }
-
-    const recording = audioRecordings.find(function(r) {
-      return r.id === recordingId;
-    });
-    if (!recording) {
-      console.error('Recording not found:', recordingId);
-      throw new Error('Recording not found');
-    }
-
-    console.log('Вызов api.uploadAudio с patient_id:', currentRecord.id);
+  const handleSaveRecording = async (recordingId: string, { blob, url: _url, duration }: { blob: Blob; url: string; duration: number }) => {
+    if (!currentRecord?.id?.startsWith('PAT-') || !blob) throw new Error('Invalid state');
+    const recording = audioRecordings.find((r) => r.id === recordingId);
+    if (!recording) throw new Error('Recording not found');
 
     const result = await api.uploadAudio({
       patient_id: currentRecord.id,
       recording_type: recording.type,
       recording_label: recording.label,
-      audio: data.blob,
-      duration: data.duration,
+      audio: blob,
+      duration,
       sample_rate: 48000,
       bits_per_sample: 16,
       channels: 1,
       status: 'completed',
     });
 
-    console.log('Ответ от api.uploadAudio:', result);
-
     if (result.success) {
-      const audioUrl = result.data?.data?.audio?.yandex_disk_url
-        ? result.data.data.audio.yandex_disk_url
-        : (result.data?.data?.audio?.file_path
-            ? ('http://localhost:3001' + result.data.data.audio.file_path)
-            : data.url);
-
-      const updatedRecordings = audioRecordings.map(function(r) {
-        if (r.id === recordingId) {
-          return {
-            ...r,
-            status: 'completed' as const,
-            duration: data.duration,
-            url: audioUrl,
-          };
-        }
-        return r;
-      });
-
-      setAudioRecordings(updatedRecordings);
-
-      setCurrentRecord(function(prev) {
-        if (!prev) return null;
-        return {
-          ...prev,
-          audioRecordings: updatedRecordings,
-        };
-      });
-
-      const nextPending = updatedRecordings.find(function(r) {
-        return r.status === 'pending';
-      });
-      if (nextPending) {
-        console.log('Автопереход к следующей записи:', nextPending.id);
-        setCurrentRecordingId(nextPending.id);
-        resetRecording();
-      }
-
-      console.log('Аудио успешно сохранено в состоянии');
+      const s3Url = result.data?.data?.audio?.yandex_disk_url || result.data?.data?.audio?.url;
+      const updated = audioRecordings.map((r) => r.id === recordingId ? { ...r, status: 'completed' as const, duration, url: s3Url } : r);
+      setAudioRecordings(updated);
+      setCurrentRecord((prev) => prev ? { ...prev, audioRecordings: updated } : null);
+      const next = updated.find((r) => r.status === 'pending');
+      if (next) setCurrentRecordingId(next.id);
+      setPendingSaveId(null);
+      resetRecording();
     } else {
-      console.error('Не удалось загрузить аудио:', result.error);
       throw new Error(result.error || 'Failed to upload audio');
     }
   };
 
   const handlePlayAudio = (url?: string) => {
     if (!url) return;
+    if (currentAudioRef.current) { currentAudioRef.current.pause(); currentAudioRef.current.src = ''; currentAudioRef.current = null; }
     const audio = new Audio(url);
-    audio.play().catch(function(err) {
-      console.error('Ошибка воспроизведения:', err);
-    });
+    currentAudioRef.current = audio;
+    audio.onended = () => { currentAudioRef.current = null; };
+    audio.play().catch(() => {});
   };
 
   const handleContinue = async () => {
     if (screen === 'form') {
-      if (currentRecord) {
-        console.log('Сохранение пациента в БД:', currentRecord.id);
+      const patientData = {
+        patient_name: currentRecord?.patientName || '',
+        age: currentRecord?.age || '',
+        gender: currentRecord?.gender || 'male',
+        chief_complaint: currentRecord?.chiefComplaint || '',
+        notes: currentRecord?.notes || '',
+        blood_pressure: currentRecord?.vitals?.bloodPressure || '',
+        heart_rate: currentRecord?.vitals?.heartRate || '',
+        temperature: currentRecord?.vitals?.temperature || '',
+        protocol_type: selectedProtocol || undefined,
+        parkinsonism_stage: currentRecord?.parkinsonismStage,
+        comorbidities: currentRecord?.comorbidities,
+        diagnosis: currentRecord?.diagnosis,
+        moca_score: currentRecord?.mocaScore,
+      };
 
-        const patientData = {
-          patient_name: currentRecord.patientName,
-          age: currentRecord.age,
-          gender: currentRecord.gender,
-          chief_complaint: currentRecord.chiefComplaint,
-          notes: currentRecord.notes || '',
-          blood_pressure: currentRecord.vitals.bloodPressure,
-          heart_rate: currentRecord.vitals.heartRate,
-          temperature: currentRecord.vitals.temperature,
-          protocol_type: selectedProtocol || undefined,
-          parkinsonism_stage: currentRecord.parkinsonismStage,
-          comorbidities: currentRecord.comorbidities,
-          diagnosis: currentRecord.diagnosis,
-          moca_score: currentRecord.mocaScore,
-        };
-
-        const result = await api.createPatient(patientData);
-
-        if (result.success && result.data?.data) {
-          const savedPatient = result.data.data;
-          setCurrentRecord(function(prev) {
-            if (!prev) return null;
-            return {
-              ...prev,
-              id: savedPatient.id,
-            };
-          });
-          console.log('Пациент сохранён в БД:', savedPatient.id);
-        } else {
-          console.error('Не удалось сохранить пациента:', result.error);
-          alert('Не удалось сохранить данные пациента');
-          return;
-        }
-      }
-
-      const requirements: AudioRecording[] = [];
-      if (selectedProtocol === 'phonemes' || selectedProtocol === 'full') {
-        requirements.push(
-          { id: 'phoneme_a', type: 'phoneme_a', label: 'Фонема «аааааааа»', minDuration: 9, status: 'pending' },
-          { id: 'phoneme_oi', type: 'phoneme_oi', label: 'Фонемы «о-и-о-и-о-и»', minDuration: 9, status: 'pending' }
-        );
-      }
-      if (selectedProtocol === 'speech' || selectedProtocol === 'full') {
-        requirements.push(
-          { id: 'picture_cookie', type: 'picture_cookie', label: 'Описание картинки «Вор печенья»', minDuration: 20, maxDuration: 90, status: 'pending' },
-          { id: 'text_bear', type: 'text_bear', label: 'Чтение текста «Гималайский медведь»', maxDuration: 120, status: 'pending' }
-        );
-        if (selectedProtocol === 'full') {
+      const result = await api.createPatient(patientData);
+      if (result.success && result.data?.data?.patient) {
+        const savedPatient = result.data.data.patient;
+        setCurrentRecord((prev) => prev ? { ...prev, id: savedPatient.id } : null);
+        const requirements: AudioRecording[] = [];
+        if (selectedProtocol === 'phonemes' || selectedProtocol === 'full') {
           requirements.push(
-            { id: 'picture_cat', type: 'picture_cat', label: 'Описание картинки «Кошка на дереве»', minDuration: 20, maxDuration: 90, status: 'pending' }
+            { id: 'phoneme_a', type: 'phoneme_a', label: 'Фонема «аааааааа»', minDuration: 9, status: 'pending' },
+            { id: 'phoneme_oi', type: 'phoneme_oi', label: 'Фонемы «о-и-о-и-о-и»', minDuration: 9, status: 'pending' }
           );
         }
-      }
-      setAudioRecordings(requirements);
-      setCurrentRecordingId(requirements[0]?.id || null);
-      setScreen('capture');
-
-    } else if (screen === 'capture') {
-      console.log('Завершение записи, загрузка на Яндекс.Диск...');
-
-      if (currentRecord?.id && audioRecordings.length > 0) {
-        const completedRecordings = audioRecordings.filter(function(r) {
-          return r.status === 'completed';
-        });
-
-        for (let i = 0; i < completedRecordings.length; i++) {
-          const recording = completedRecordings[i];
-          try {
-            console.log('Загрузка на Яндекс.Диск:', recording.label);
-
-            const response = await fetch(API_BASE_URL + '/patients/sync-yandex', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                patient_id: currentRecord.id,
-                recording_type: recording.type,
-                recording_label: recording.label,
-                duration: recording.duration || 0,
-              }),
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-              console.log('Загружено на Яндекс.Диск:', recording.label, result.data?.yandex_disk_url);
-
-              setAudioRecordings(function(prev) {
-                return prev.map(function(r) {
-                  if (r.id === recording.id) {
-                    return { ...r, url: result.data?.yandex_disk_url || r.url };
-                  }
-                  return r;
-                });
-              });
-            } else {
-              console.warn('Не удалось загрузить:', recording.label);
-              yandexDiskSync.addPendingUpload({
-                id: recording.id,
-                patient_id: currentRecord.id,
-                recording_type: recording.type,
-                recording_label: recording.label,
-                file_path: recording.url || '',
-                duration: recording.duration || 0,
-                status: 'pending',
-                retry_count: 0,
-              });
-            }
-          } catch (error) {
-            console.error('Ошибка загрузки:', recording.label, error);
-            yandexDiskSync.addPendingUpload({
-              id: recording.id,
-              patient_id: currentRecord.id,
-              recording_type: recording.type,
-              recording_label: recording.label,
-              file_path: recording.url || '',
-              duration: recording.duration || 0,
-              status: 'pending',
-              retry_count: 0,
-            });
+        if (selectedProtocol === 'speech' || selectedProtocol === 'full') {
+          requirements.push(
+            { id: 'picture_cookie', type: 'picture_cookie', label: 'Описание картинки «Вор печенья»', minDuration: 20, maxDuration: 90, status: 'pending' },
+            { id: 'text_bear', type: 'text_bear', label: 'Чтение текста «Гималайский медведь»', maxDuration: 120, status: 'pending' }
+          );
+          if (selectedProtocol === 'full') {
+            requirements.push({ id: 'picture_cat', type: 'picture_cat', label: 'Описание картинки «Кошка на дереве»', minDuration: 20, maxDuration: 90, status: 'pending' });
           }
         }
+        setAudioRecordings(requirements);
+        setCurrentRecordingId(requirements[0]?.id || null);
+        setScreen('capture');
+      } else {
+        alert('Не удалось сохранить пациента');
       }
-
+    } else if (screen === 'capture') {
       setScreen('processing');
-      setTimeout(function() {
-        setScreen('results');
-      }, 2000);
-
+      setTimeout(() => setScreen('results'), 1500);
     } else if (screen === 'results') {
       setScreen('home');
       setCurrentRecord(null);
@@ -605,59 +639,121 @@ function App() {
     }
   };
 
-  const handleSelectRecording = (id: string) => {
-    setCurrentRecordingId(id);
-    resetRecording();
-  };
-
-  const handleUpdateRecording = (id: string, update: Partial<AudioRecording>) => {
-    setAudioRecordings(function(prev) {
-      return prev.map(function(r) {
-        if (r.id === id) {
-          return { ...r, ...update };
-        }
-        return r;
-      });
-    });
-  };
-
-  const getAllCompleted = () => {
-    return audioRecordings.length > 0 && audioRecordings.every(function(r) {
-      return r.status === 'completed';
-    });
-  };
-
   const renderScreen = () => {
     switch (screen) {
+      // ── E3: Главная ──────────────────────────────────────────────────────
       case 'home':
         return (
           <HomeScreen
             records={patients}
             loading={loading}
-            onViewRecord={(record) => {
-              setCurrentRecord(record);
-              setScreen('view');
-            }}
+            onViewRecord={(record) => { setCurrentRecord(record); setScreen('view'); }}
             onCreateNew={handleNewPatient}
-            onOpenAssessments={() => setScreen('assessments')}
+            onOpenSupport={() => setScreen('support')}
+            onOpenMyCases={() => setScreen('myCases')}
           />
         );
-      case 'protocolSelect':
+
+      // ── E3 sub: Мои кейсы ────────────────────────────────────────────────
+      case 'myCases':
         return (
-          <ProtocolSelectScreen
-            onSelectProtocol={handleProtocolSelect}
-            onBack={handleBack}
+          <MyCasesScreen
+            records={patients}
+            onBack={() => setScreen('home')}
+            onViewCase={(record) => { setCurrentRecord(record); setScreen('view'); }}
           />
         );
+
+      // ── E14: Поддержка ────────────────────────────────────────────────────
+      case 'support':
+        return <SupportScreen onBack={() => setScreen('home')} />;
+
+      // ── E4 шаг 1: Выбор протокола ─────────────────────────────────────────
+      case 'protocolSelect':
+        return <ProtocolSelectScreen onSelectProtocol={handleProtocolSelect} onBack={handleBack} />;
+
+      // ── E4 шаг 2: Данные пациента ─────────────────────────────────────────
       case 'form':
         return (
           <FormScreen
             record={currentRecord}
             onBack={handleBack}
             onChange={setCurrentRecord}
-            onContinue={handleContinue}
+            onContinue={handleFormContinue}
+            onAddPhotoLocal={handleAddPhotoLocal}
+            onRemovePhoto={handleRemovePhoto}
           />
         );
+
+      // ── E5–E6: Согласие + Подпись ─────────────────────────────────────────
+      case 'consent':
+        if (!caseFlow || !user) return null;
+        return (
+          <ConsentScreen
+            caseId={caseFlow.patientId}
+            doctorId={user.id}
+            onBack={() => setScreen('form')}
+            onConfirm={handleConsentConfirmed}
+          />
+        );
+
+      // ── E7: Список заданий ────────────────────────────────────────────────
+      case 'taskList':
+        if (!caseFlow) return null;
+        return (
+          <TaskListScreen
+            tasks={caseFlow.tasks}
+            protocol={caseFlow.protocol}
+            caseNumber={currentRecord?.caseNumber}
+            onBack={() => setScreen('consent')}
+            onRecordTask={handleRecordTask}
+            onSkipTask={handleSkipTask}
+            onProceedToSubmit={() => setScreen('readyToSubmit')}
+          />
+        );
+
+      // ── E8 + E9: Запись + QC ──────────────────────────────────────────────
+      case 'recording': {
+        if (!caseFlow || !activeTaskId) return null;
+        const activeTask = caseFlow.tasks.find(t => t.id === activeTaskId);
+        if (!activeTask) return null;
+        return (
+          <RecordingScreen
+            task={activeTask}
+            onBack={() => setScreen('taskList')}
+            onSave={handleTaskSaved}
+          />
+        );
+      }
+
+      // ── E10: Проверка и отправка ──────────────────────────────────────────
+      case 'readyToSubmit':
+        if (!caseFlow) return null;
+        return (
+          <ReadyToSubmitScreen
+            tasks={caseFlow.tasks}
+            consent={caseFlow.consent}
+            hasRequiredFields={!!(currentRecord?.age && currentRecord?.gender)}
+            hasAttachments={true}
+            isOffline={isOffline}
+            onSubmit={handleSubmitCase}
+            onBack={() => setScreen('taskList')}
+          />
+        );
+
+      // ── E11: Итоговый статус ──────────────────────────────────────────────
+      case 'caseResult':
+        return (
+          <CaseResultScreen
+            caseNumber={finalCaseNumber}
+            caseStatus={finalCaseStatus}
+            rejectionCode={finalRejectionCode}
+            onGoHome={handleGoHomeFromResult}
+            onNewCase={handleNewCaseFromResult}
+          />
+        );
+
+      // ── Legacy: старый экран записи ───────────────────────────────────────
       case 'capture':
         return (
           <CaptureScreen
@@ -665,7 +761,7 @@ function App() {
             selectedProtocol={selectedProtocol}
             isRecording={isRecording}
             isPaused={isPaused}
-            audioData={audioData}
+            audioData={audioData as any}
             recordingTime={recordingTime}
             showMandatoryPhotoWarning={false}
             fileInputRef={fileInputRef}
@@ -676,7 +772,7 @@ function App() {
             onPauseRecording={pauseRecording}
             onResumeRecording={resumeRecording}
             onStopRecording={handleStopRecording}
-            onReRecord={resetRecording}
+            onReRecord={() => { setPendingSaveId(null); resetRecording(); }}
             onPlayAudio={handlePlayAudio}
             onContinue={handleContinue}
             onSaveRecording={handleSaveRecording}
@@ -684,52 +780,42 @@ function App() {
             formatFileSize={formatFileSize}
             audioRecordings={audioRecordings}
             currentRecordingId={currentRecordingId}
-            onSelectRecording={handleSelectRecording}
-            onUpdateRecording={handleUpdateRecording}
-            allCompleted={getAllCompleted()}
+            pendingSaveId={pendingSaveId}
+            onSelectRecording={(id) => setCurrentRecordingId(id)}
+            onUpdateRecording={(id, update) => setAudioRecordings((prev) => prev.map((r) => r.id === id ? { ...r, ...update } : r))}
+            allCompleted={audioRecordings.length > 0 && audioRecordings.every((r) => r.status === 'completed')}
           />
         );
+
       case 'processing':
-        return <ProcessingScreen onContinue={handleContinue} />;
+        return <ProcessingScreen currentRecord={currentRecord} onBack={handleBack} onContinue={handleContinue} />;
+
       case 'results':
-        return (
-          <ResultsScreen
-            record={currentRecord}
-            audioRecordings={audioRecordings}
-            onBack={() => setScreen('capture')}
-            onContinue={handleContinue}
-          />
-        );
+        return <ResultsScreen record={currentRecord} audioRecordings={audioRecordings} onBack={handleBack} onContinue={handleContinue} />;
+
       case 'view':
-        return (
-          <ViewScreen
-            record={currentRecord}
-            onBack={handleBack}
-            onEdit={() => setScreen('form')}
-          />
-        );
+        return <ViewScreen record={currentRecord} onBack={handleBack} onEdit={() => setScreen('form')} />;
+
       case 'assessments':
         return (
           <AssessmentsScreen
-            record={currentRecord}
+            records={patients}
             onBack={handleBack}
-            onSave={(updates) => setCurrentRecord(function(prev) {
-              if (!prev) return null;
-              return { ...prev, ...updates };
-            })}
+            onCreateMDSUPDRS={() => {}}
+            onCreateMoCA={() => {}}
+            onViewRecord={(record) => { setCurrentRecord(record); setScreen('view'); }}
           />
         );
+
       default:
         return (
           <HomeScreen
             records={patients}
             loading={loading}
-            onViewRecord={(record) => {
-              setCurrentRecord(record);
-              setScreen('view');
-            }}
+            onViewRecord={(record) => { setCurrentRecord(record); setScreen('view'); }}
             onCreateNew={handleNewPatient}
-            onOpenAssessments={() => setScreen('assessments')}
+            onOpenSupport={() => setScreen('support')}
+            onOpenMyCases={() => setScreen('myCases')}
           />
         );
     }
@@ -737,8 +823,31 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Офлайн-баннер */}
+      <OfflineBanner initialOffline={isOffline} />
+      {/* Кнопка перехода в панель администратора */}
+      {user?.role === 'admin' && screen === 'home' && (
+        <div className="fixed top-2 right-2 z-50">
+          <button
+            onClick={onGoAdmin}
+            className="bg-purple-600 text-white text-xs px-3 py-1.5 rounded-lg shadow hover:bg-purple-700"
+          >
+            Управление
+          </button>
+        </div>
+      )}
       {renderScreen()}
     </div>
+  );
+}
+
+// ─── Root ─────────────────────────────────────────────────────────────────────
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppWithAuth />
+    </AuthProvider>
   );
 }
 

@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = 'https://bba8vah5ofa4lbqtm3sb.containers.yandexcloud.net/api';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -20,9 +20,9 @@ export interface PatientData {
   moca?: any;
   diseases?: any[];
 }
-
+ 
 export const api = {
-  async createPatient( PatientData): Promise<ApiResponse> {
+  async createPatient(data: PatientData): Promise<ApiResponse> {
     try {
       console.log('Отправка данных на сервер:', data);
 
@@ -33,13 +33,13 @@ export const api = {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json() as { error?: string };
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
-      const result = await response.json();
+      const result = await response.json() as { data?: any };
       console.log('✅ Успешно сохранено:', result);
-      return { success: true,  result.data };
+      return { success: true, data: result.data };
     } catch (error) {
       console.error('❌ Ошибка сохранения:', error);
       return {
@@ -57,8 +57,8 @@ export const api = {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const result = await response.json();
-      return { success: true,  result.data };
+      const result = await response.json() as { data?: any };
+      return { success: true, data: result.data };
     } catch (error) {
       console.error('API Error:', error);
       return {
@@ -76,7 +76,7 @@ export const api = {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const result = await response.json();
+      const result = await response.json() as { data?: any };
       return { success: true, data: result.data };
     } catch (error) {
       console.error('API Error:', error);
@@ -95,8 +95,8 @@ export const api = {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const result = await response.json();
-      return { success: true,  result.data };
+      const result = await response.json() as { data?: any };
+      return { success: true, data: result.data };
     } catch (error) {
       console.error('API Error:', error);
       return {

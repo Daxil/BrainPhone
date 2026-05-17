@@ -6,7 +6,14 @@
   "scripts": {
     "dev": "nodemon --exec ts-node src/app.ts",
     "build": "tsc",
-    "start": "node dist/app.js"
+    "start": "node dist/app.js",
+    "seed:admin": "ts-node src/scripts/seed-admin.ts",
+    "migrate": "ts-node src/scripts/migrate.ts",
+    "test": "jest --runInBand",
+    "test:unit": "jest --testPathPatterns=unit",
+    "test:integration": "jest --testPathPatterns=integration",
+    "rotate:totp-key": "ts-node src/scripts/rotate_totp_key.ts",
+    "rotate:totp-key:dry": "ts-node src/scripts/rotate_totp_key.ts --dry-run"
   },
   "keywords": [
     "medical",
@@ -16,24 +23,41 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1039.0",
+    "@aws-sdk/s3-request-presigner": "^3.1039.0",
+    "argon2": "^0.44.0",
     "axios": "^1.13.6",
-    "cors": "^2.8.5",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "express-rate-limit": "^8.5.0",
     "fluent-ffmpeg": "^2.1.3",
     "helmet": "^7.1.0",
+    "ioredis": "^5.10.1",
     "multer": "^1.4.5-lts.1",
+    "nodemailer": "^8.0.7",
+    "otplib": "^12.0.1",
     "pg": "^8.11.3",
     "pg-promise": "^11.5.4",
-    "uuid": "^9.0.1"
+    "qrcode": "^1.5.4",
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.17",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
+    "@types/jest": "^30.0.0",
     "@types/multer": "^1.4.11",
     "@types/node": "^20.10.5",
+    "@types/nodemailer": "^8.0.0",
     "@types/pg": "^8.10.9",
+    "@types/qrcode": "^1.5.6",
+    "@types/supertest": "^7.2.0",
+    "jest": "^30.3.0",
     "nodemon": "^3.0.2",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.9",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }

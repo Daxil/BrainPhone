@@ -1,8 +1,26 @@
-import type { MDSUPDRSForm, MoCATest } from './forms';
+import type { MDSUPDRSForm, MoCATest, AudioRecording } from './forms';
 
 export type RecordingState = 'idle' | 'recording' | 'paused' | 'completed';
 export type SyncStatus = 'synced' | 'syncing' | 'error' | 'pending';
-export type Screen = 'home' | 'capture' | 'form' | 'processing' | 'results' | 'view' | 'mdsUpdrs' | 'moca' | 'assessments';
+export type Screen =
+  | 'home'
+  | 'protocolSelect'
+  | 'form'
+  | 'consent'
+  | 'taskList'
+  | 'recording'
+  | 'readyToSubmit'
+  | 'caseResult'
+  | 'myCases'
+  | 'support'
+  | 'capture'       // legacy
+  | 'processing'    // legacy
+  | 'results'       // legacy
+  | 'view'
+  | 'mdsUpdrs'
+  | 'moca'
+  | 'assessments';
+export type ProtocolType = 'phonemes' | 'speech' | 'full';
 
 export interface AudioConfig {
   sampleRate: number;
@@ -23,12 +41,34 @@ export interface PatientRecord {
   audioDuration?: number;
   audioSize?: number;
   audioConfig?: AudioConfig;
-  photos: { url: string; file: File | null }[];
+  photos: { url: string; file: File | null; id?: string; category?: 'consult' | 'scale' }[];
+  audioRecordings?: AudioRecording[];
   patientName: string;
   age: string;
   gender: string;
   chiefComplaint: string;
   notes: string;
+  protocolType?: string;
+  // v2 fields
+  hasParkinsonism?: boolean;
+  hasCognitive?: boolean;
+  diagnosis?: string;
+  nativeLanguage?: string;
+  cogMotorTest?: string;
+  cogMotorScore?: string;
+  caseStatus?: string;
+  caseNumber?: string;
+  rejectionCode?: string;
+  rejectionNote?: string;
+  submittedAt?: string;
+  // assessment scores (one field per instrument)
+  mocaScore?: string;
+  mmseScore?: string;
+  trchScore?: string;
+  updrsScore?: string;
+  // legacy
+  parkinsonismStage?: string;
+  comorbidities?: string;
   vitals: {
     bloodPressure: string;
     heartRate: string;
@@ -37,6 +77,8 @@ export interface PatientRecord {
   mdsUpdrs?: MDSUPDRSForm;
   moca?: MoCATest;
   diseases?: Disease[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export const validatePatientRecord = (record: PatientRecord | null): string[] => {

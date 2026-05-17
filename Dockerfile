@@ -1,0 +1,47 @@
+# Root Dockerfile — builds frontend + backend in one image.
+# Build from project root: docker build -t brainphone .
+# Express serves SPA on same domain → no CORS issues.
+#
+# Required env vars in Yandex Cloud container:
+#   DATABASE_URL, TOTP_ENCRYPTION_KEY, NODE_ENV=production
+
+# ─── Stage 1: build frontend ─────────────────────────────────────────────────
+FROM node:20-alpine AS frontend-builder
+WORKDIR /client
+COPY client/package*.json ./
+RUN npm ci
+COPY client ./
+RUN npm run build
+
+# ─── Stage 2: build backend ───────────────────────────────────────────────────
+FROM node:20-alpine AS backend-builder
+WORKDIR /app
+COPY server/package*.json server/tsconfig.json ./
+RUN npm ci
+COPY server .
+RUN npm run build
+
+# ─── Stage 3: production runtime ──────────────────────────────────────────────
+FROM node:20-alpine
+WORKDIR /app
+
+COPY server/package*.json ./
+RUN npm ci --only=production
+
+COPY --from=backend-builder /app/dist ./dist
+COPY --from=backend-builder /app/migrations ./migrations
+
+# SPA — served by Express catch-all route in production
+COPY --from=frontend-builder /client/dist ./client/dist
+
+COPY server/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
+# NODE_TLS_REJECT_UNAUTHORIZED=0 needed for Yandex Managed PG self-signed cert
+ENV NODE_TLS_REJECT_UNAUTHORIZED=0
+ENV NODE_ENV=production
+
+# Yandex Cloud Serverless Containers default port
+EXPOSE 8080
+
+ENTRYPOINT ["./entrypoint.sh"]

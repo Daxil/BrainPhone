@@ -1,3 +1,16 @@
+export interface AudioRecording {
+  id: string;
+  type: string;
+  label: string;
+  url?: string;
+  blob?: Blob;
+  duration?: number;
+  minDuration?: number;
+  maxDuration?: number;
+  status: 'pending' | 'recording' | 'completed' | 'warning';
+  recordedAt?: string;
+}
+
 export interface MDSUPDRSPart1 {
   cognitiveImpairment: number;
   hallucinations: number;

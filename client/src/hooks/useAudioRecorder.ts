@@ -4,6 +4,7 @@ interface AudioRecorderOptions {
   sampleRate?: number;
   bitsPerSample?: number;
   channels?: number;
+  gainBoost?: number;
 }
 
 interface AudioData {
@@ -16,6 +17,7 @@ export const useAudioRecorder = ({
   sampleRate = 48000,
   bitsPerSample = 16,
   channels = 1,
+  gainBoost = 2.5,
 }: AudioRecorderOptions = {}) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -30,6 +32,7 @@ export const useAudioRecorder = ({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
   const audioChunksRef = useRef<Float32Array[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef(0);
@@ -109,7 +112,15 @@ export const useAudioRecorder = ({
       currentTimeRef.current = 0;
       isPausedRef.current = false;
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate,
+          channelCount: channels,
+        },
+      });
       mediaStreamRef.current = stream;
       console.log('Микрофон доступен');
 
@@ -120,6 +131,10 @@ export const useAudioRecorder = ({
 
       const source = audioContext.createMediaStreamSource(stream);
       sourceRef.current = source;
+
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = gainBoost;
+      gainNodeRef.current = gainNode;
 
       const scriptProcessor = audioContext.createScriptProcessor(4096, channels, channels);
       scriptProcessorRef.current = scriptProcessor;
@@ -132,10 +147,10 @@ export const useAudioRecorder = ({
         const buffer = new Float32Array(channelData.length);
         buffer.set(channelData);
         audioChunksRef.current.push(buffer);
-        console.log('Аудио-чанк WAV получен, размер:', buffer.length);
       };
 
-      source.connect(scriptProcessor);
+      source.connect(gainNode);
+      gainNode.connect(scriptProcessor);
       scriptProcessor.connect(audioContext.destination);
 
       setIsRecording(true);
@@ -193,6 +208,11 @@ export const useAudioRecorder = ({
     if (scriptProcessorRef.current) {
       scriptProcessorRef.current.disconnect();
       scriptProcessorRef.current = null;
+    }
+
+    if (gainNodeRef.current) {
+      gainNodeRef.current.disconnect();
+      gainNodeRef.current = null;
     }
 
     if (sourceRef.current) {

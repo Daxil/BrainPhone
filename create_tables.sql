@@ -1,54 +1,121 @@
--- Таблица пациентов
-CREATE TABLE IF NOT EXISTS patients (
-  id VARCHAR(50) PRIMARY KEY,
+-- ============================================
+-- BrainPhone Database Schema
+-- PostgreSQL / Yandex Managed Service for PostgreSQL
+-- ============================================
+
+-- Удаление таблиц если существуют (для чистой установки)
+DROP TABLE IF EXISTS patient_photos;
+DROP TABLE IF EXISTS patient_audio;
+DROP TABLE IF EXISTS patients;
+
+-- ============================================
+-- Таблица: patients
+-- ============================================
+CREATE TABLE patients (
+  id VARCHAR(64) PRIMARY KEY,
   patient_name VARCHAR(255) NOT NULL,
   age VARCHAR(10) NOT NULL,
-  gender VARCHAR(20) NOT NULL,
+  gender VARCHAR(10) NOT NULL CHECK (gender IN ('male', 'female', 'other')),
   chief_complaint TEXT NOT NULL,
   notes TEXT,
-  blood_pressure VARCHAR(20),
-  heart_rate VARCHAR(20),
-  temperature VARCHAR(20),
-  audio_config JSONB,
+  
+  -- Витальные показатели
+  blood_pressure VARCHAR(50),
+  heart_rate VARCHAR(50),
+  temperature VARCHAR(50),
+  
+  -- Протокол и диагностика
+  protocol_type VARCHAR(50),
+  parkinsonism_stage VARCHAR(100),
+  comorbidities TEXT,
+  diagnosis TEXT,
+  moca_score VARCHAR(50),
+  
+  -- Оценочные шкалы (JSON)
   mds_updrs JSONB,
   moca JSONB,
-  diseases JSONB,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  
+  -- Метаданные
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Таблица фото
-CREATE TABLE IF NOT EXISTS patient_photos (
-  id VARCHAR(50) PRIMARY KEY,
-  patient_id VARCHAR(50) NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-  file_name VARCHAR(255) NOT NULL,
+CREATE INDEX idx_patients_created_at ON patients(created_at DESC);
+CREATE INDEX idx_patients_name ON patients(patient_name);
+
+-- ============================================
+-- Таблица: patient_audio
+-- ============================================
+CREATE TABLE patient_audio (
+  id SERIAL PRIMARY KEY,
+  patient_id VARCHAR(64) NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  
+  -- Информация о записи
+  recording_type VARCHAR(100) NOT NULL,
+  recording_label VARCHAR(255),
   file_path VARCHAR(500) NOT NULL,
-  file_size BIGINT NOT NULL,
-  mime_type VARCHAR(100) NOT NULL,
-  yandex_disk_url VARCHAR(500),
-  uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  
+  -- Технические параметры аудио
+  duration INTEGER DEFAULT 0,
+  sample_rate INTEGER DEFAULT 48000,
+  bits_per_sample INTEGER DEFAULT 16,
+  channels INTEGER DEFAULT 1,
+  file_size INTEGER,
+  
+  -- Статус и хранение
+  status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'uploaded', 'failed')),
+  uploaded_at TIMESTAMPTZ DEFAULT NOW(),
+  
+  -- Ссылка на облачное хранилище (S3/Yandex Disk)
+  yandex_disk_url TEXT,
+  
+  -- Уникальность: один тип записи на пациента
+  CONSTRAINT unique_patient_recording UNIQUE (patient_id, recording_type)
 );
 
--- Таблица аудио
-CREATE TABLE IF NOT EXISTS patient_audio (
-  id VARCHAR(50) PRIMARY KEY,
-  patient_id VARCHAR(50) NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-  file_name VARCHAR(255) NOT NULL,
+CREATE INDEX idx_patient_audio_patient_id ON patient_audio(patient_id);
+CREATE INDEX idx_patient_audio_uploaded_at ON patient_audio(uploaded_at DESC);
+CREATE INDEX idx_patient_audio_status ON patient_audio(status);
+
+-- ============================================
+-- Таблица: patient_photos
+-- ============================================
+CREATE TABLE patient_photos (
+  id SERIAL PRIMARY KEY,
+  patient_id VARCHAR(64) NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  
   file_path VARCHAR(500) NOT NULL,
-  file_size BIGINT NOT NULL,
-  duration INTEGER NOT NULL,
-  mime_type VARCHAR(100) NOT NULL,
-  sample_rate INTEGER NOT NULL,
-  bits_per_sample INTEGER NOT NULL,
-  channels INTEGER NOT NULL,
-  yandex_disk_url VARCHAR(500),
-  uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  uploaded_at TIMESTAMPTZ DEFAULT NOW(),
+  
+  -- Ссылка на облачное хранилище (S3)
+  yandex_disk_url TEXT
 );
 
+CREATE INDEX idx_patient_photos_patient_id ON patient_photos(patient_id);
+CREATE INDEX idx_patient_photos_uploaded_at ON patient_photos(uploaded_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_patients_created_at ON patients(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_patients_patient_name ON patients(patient_name);
-CREATE INDEX IF NOT EXISTS idx_photos_patient_id ON patient_photos(patient_id);
-CREATE INDEX IF NOT EXISTS idx_audio_patient_id ON patient_audio(patient_id);
+-- ============================================
+-- Триггер для автоматического обновления updated_at
+-- ============================================
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ language 'plpgsql';
 
-SELECT 'Таблицы созданы успешно' as status;
+CREATE TRIGGER update_patients_updated_at
+  BEFORE UPDATE ON patients
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================
+-- Проверка создания таблиц
+-- ============================================
+SELECT 
+  'patients' as table_name, COUNT(*) as row_count FROM patients
+UNION ALL
+SELECT 'patient_audio', COUNT(*) FROM patient_audio
+UNION ALL
+SELECT 'patient_photos', COUNT(*) FROM patient_photos;
