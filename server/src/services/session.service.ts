@@ -69,26 +69,28 @@ export async function validateSession(req: Request, res: Response): Promise<bool
 
   // Scoped sessions are NOT bound to IP/UA (they come right after set-password in same browser)
   const isScoped = session.scope && session.scope.length > 0;
-  // IP binding is disabled in production: behind a cloud load-balancer the
-  // forwarded IP can vary per-request, which would invalidate every session
-  // for users outside the local network.
-  const IP_BINDING_ENABLED = process.env.SESSION_IP_BINDING === 'true';
 
-  if (!isScoped && IP_BINDING_ENABLED) {
-    const currentIpHash = hashIpSubnet(req.ip || '');
-    if (session.ip_hash !== currentIpHash) {
-      await dbRevoke(sessionId);
-      await logAudit({ eventType: 'session_rejected_ip', userId: session.user_id });
-      clearCookie(res);
-      return false;
-    }
-
+  if (!isScoped) {
+    // UA binding: always enforced — User-Agent is stable and doesn't vary across load-balancers.
     const currentUaHash = hashUA(req.headers['user-agent'] || '');
     if (session.ua_hash !== currentUaHash) {
       await dbRevoke(sessionId);
       await logAudit({ eventType: 'session_rejected_ua', userId: session.user_id });
       clearCookie(res);
       return false;
+    }
+
+    // IP binding: opt-in via SESSION_IP_BINDING=true. Disabled by default because behind a
+    // cloud load-balancer the forwarded IP can vary per-request.
+    const IP_BINDING_ENABLED = process.env.SESSION_IP_BINDING === 'true';
+    if (IP_BINDING_ENABLED) {
+      const currentIpHash = hashIpSubnet(req.ip || '');
+      if (session.ip_hash !== currentIpHash) {
+        await dbRevoke(sessionId);
+        await logAudit({ eventType: 'session_rejected_ip', userId: session.user_id });
+        clearCookie(res);
+        return false;
+      }
     }
   }
 
