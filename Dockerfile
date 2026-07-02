@@ -41,6 +41,11 @@ RUN chmod +x ./entrypoint.sh
 ENV NODE_TLS_REJECT_UNAUTHORIZED=0
 ENV NODE_ENV=production
 
+# SPA lives at /app/client/dist in this image. The app's default resolves to
+# ../../client/dist (correct for the dev monorepo layout, i.e. server/dist/ →
+# repo-root/client/dist), which points OUTSIDE /app here — so set it explicitly.
+ENV SPA_DIST_PATH=/app/client/dist
+
 # Yandex Cloud Serverless Containers default port
 EXPOSE 8080
 
