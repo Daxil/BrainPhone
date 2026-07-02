@@ -36,7 +36,7 @@ import AdminPage from './pages/AdminPage';
 import { ONBOARDING_KEY, PROTOCOL_TASKS } from './constants/statuses';
 import { enqueue, startQueueProcessor } from './services/offlineQueue';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://bba8vah5ofa4lbqtm3sb.containers.yandexcloud.net/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 // ─── Detect special URLs handled outside the main SPA ─────────────────────────
 
@@ -99,7 +99,7 @@ function AppWithAuth() {
   // so the server's 30-min idle TTL never expires during active use.
   useEffect(() => {
     if (!user) return;
-    const BASE = import.meta.env.VITE_API_URL || 'https://bba8vah5ofa4lbqtm3sb.containers.yandexcloud.net/api';
+    const BASE = import.meta.env.VITE_API_URL || '/api';
     const ping = () => {
       if (document.visibilityState === 'visible') {
         fetch(`${BASE}/auth/me`, { credentials: 'include' }).catch(() => {});
