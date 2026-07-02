@@ -39,6 +39,15 @@ export async function authMiddleware(
     return next();
   }
 
+  // The compiled SPA (index.html + hashed assets) and its client-side routes are
+  // the public frontend bundle; only the API is session-protected. Anything that
+  // is not an /api request is handled by the static/SPA handlers downstream, so
+  // let unauthenticated GET/HEAD through — otherwise the login page itself (and
+  // its assets) 401 before it can ever load.
+  if ((req.method === 'GET' || req.method === 'HEAD') && !req.path.startsWith('/api/')) {
+    return next();
+  }
+
   const valid = await validateSession(req, res);
   if (!valid) {
     res.status(401).json({ success: false, error: 'Authentication required' });

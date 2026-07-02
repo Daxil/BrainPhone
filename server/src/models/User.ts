@@ -20,11 +20,23 @@ export interface UserRow {
   created_by: string | null;
 }
 
+// Optional server-side secret ("pepper") mixed into every password hash via argon2's
+// keyed-hashing `secret` parameter. It lives outside the database (Lockbox / env), so a
+// database-only leak cannot be brute-forced offline — argon2 stores only the random salt
+// in the hash, never the secret. If PASSWORD_PEPPER is unset (e.g. local dev) hashing
+// falls back to salt-only argon2.
+// WARNING: changing or removing the pepper invalidates every existing hash — it must be
+// set before any users are created.
+const PEPPER_SECRET = process.env.PASSWORD_PEPPER
+  ? Buffer.from(process.env.PASSWORD_PEPPER)
+  : undefined;
+
 const ARGON2_OPTIONS: argon2.Options = {
   type: argon2.argon2id,
   memoryCost: 65536,
   timeCost: 3,
   parallelism: 4,
+  ...(PEPPER_SECRET ? { secret: PEPPER_SECRET } : {}),
 };
 
 export async function hashPassword(password: string): Promise<string> {
@@ -33,7 +45,7 @@ export async function hashPassword(password: string): Promise<string> {
 
 export async function verifyPassword(hash: string, password: string): Promise<boolean> {
   try {
-    return await argon2.verify(hash, password);
+    return await argon2.verify(hash, password, PEPPER_SECRET ? { secret: PEPPER_SECRET } : undefined);
   } catch {
     return false;
   }
