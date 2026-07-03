@@ -1,6 +1,10 @@
 import { Request, Response } from 'express';
 import { db } from '../config/database';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import ffmpeg from 'fluent-ffmpeg';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 const s3Client = new S3Client({
   region: 'ru-central1',
@@ -121,6 +125,28 @@ async function savePatientJsonToS3(patient: Record<string, any>): Promise<void> 
   }));
 }
 
+async function convertWavToFlac(wavBuffer: Buffer): Promise<Buffer> {
+  const id = `bp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const wavPath = path.join(os.tmpdir(), `${id}.wav`);
+  const flacPath = path.join(os.tmpdir(), `${id}.flac`);
+
+  try {
+    await fs.promises.writeFile(wavPath, wavBuffer);
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg(wavPath)
+        .audioCodec('flac')
+        .format('flac')
+        .save(flacPath)
+        .on('end', () => resolve())
+        .on('error', (err: Error) => reject(err));
+    });
+    return await fs.promises.readFile(flacPath);
+  } finally {
+    fs.promises.unlink(wavPath).catch(() => {});
+    fs.promises.unlink(flacPath).catch(() => {});
+  }
+}
+
 export const uploadAudio = async (req: Request, res: Response) => {
   try {
     const { patient_id, recording_type, recording_label, duration, sample_rate, bits_per_sample, channels } = req.body;
@@ -163,14 +189,22 @@ export const uploadAudio = async (req: Request, res: Response) => {
       await db.none('DELETE FROM patient_audio WHERE patient_id = $1 AND recording_type = $2', [patient_id, recording_type]);
     }
 
-    const fileName = `${patient_id}_${recording_type}_${Date.now()}.wav`;
+    let audioBuffer: Buffer;
+    try {
+      audioBuffer = await convertWavToFlac(buf);
+    } catch (convErr: any) {
+      console.error('FLAC conversion failed:', convErr.message);
+      return res.status(500).json({ success: false, error: 'Audio conversion to FLAC failed' });
+    }
+
+    const fileName = `${patient_id}_${recording_type}_${Date.now()}.flac`;
     const s3Key = `audio/${fileName}`;
 
     await s3Client.send(new PutObjectCommand({
       Bucket: AUDIO_BUCKET_NAME,
       Key: s3Key,
-      Body: buf,
-      ContentType: 'audio/wav',
+      Body: audioBuffer,
+      ContentType: 'audio/flac',
       ACL: 'public-read',
     }));
 
@@ -186,7 +220,7 @@ export const uploadAudio = async (req: Request, res: Response) => {
         patient_id, recording_type, recording_label || '', fileName,
         parseFloat(duration) || 0, parseInt(sample_rate) || 48000,
         parseInt(bits_per_sample) || 16, parseInt(channels) || 1,
-        req.file.size, 'completed', publicUrl,
+        audioBuffer.length, 'completed', publicUrl,
       ]
     );
 
