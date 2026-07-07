@@ -195,6 +195,9 @@ const startServer = async () => {
 
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`✅ Server running on http://0.0.0.0:${PORT} [${process.env.NODE_ENV || 'development'}]`);
+      // Build marker — if this line is missing from the logs, the container is
+      // running an OLD image and the latest code was NOT deployed.
+      console.log('🟢 BUILD MARKER: db-reconnect+retry+silence v2025-07-07');
     });
   } catch (err) {
     console.error('❌ Failed to start server:', err);
