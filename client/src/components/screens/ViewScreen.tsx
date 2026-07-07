@@ -45,9 +45,14 @@ export default function ViewScreen({ record, onBack, onEdit }: ViewScreenProps) 
     const audio = new Audio();
     audio.src = playUrl;
     audio.preload = 'auto';
-    audio.crossOrigin = 'anonymous';
+    // NB: не ставим crossOrigin — иначе браузер требует CORS-заголовки от
+    // хранилища, и без них воспроизведение молча падает. Для прослушивания
+    // (без WebAudio-анализа) CORS не нужен.
 
-    audio.onerror = () => setPlayingId(null);
+    audio.onerror = () => {
+      console.warn('Не удалось воспроизвести аудио:', playUrl);
+      setPlayingId(null);
+    };
     audio.onended = () => {
       setPlayingId(null);
       audioRef.current = null;

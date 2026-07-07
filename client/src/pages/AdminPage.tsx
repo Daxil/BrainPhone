@@ -84,9 +84,9 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
     if (playingId === id) return;
     const playUrl = url.includes('yandex.net') ? `${url}?download=1` : url;
     const audio = new Audio(playUrl);
-    audio.crossOrigin = 'anonymous';
+    // без crossOrigin — иначе нужен CORS от хранилища, и воспроизведение падает
     audio.onended = () => { setPlayingId(null); audioRef.current = null; };
-    audio.onerror = () => { setPlayingId(null); audioRef.current = null; };
+    audio.onerror = () => { console.warn('Не удалось воспроизвести аудио:', playUrl); setPlayingId(null); audioRef.current = null; };
     audio.play().then(() => {
       setPlayingId(id);
       audioRef.current = audio;
