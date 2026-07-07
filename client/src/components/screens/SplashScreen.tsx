@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { STRINGS } from '../../constants/ui';
 
 // Health endpoint is at /health (outside /api prefix, before auth middleware)
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://bba8vah5ofa4lbqtm3sb.containers.yandexcloud.net/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 const HEALTH_URL   = API_BASE_URL.replace(/\/api$/, '') + '/health';
 
 interface SyncStep {
