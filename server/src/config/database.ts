@@ -79,6 +79,15 @@ const db = new Proxy(rawDb, {
   },
 }) as typeof rawDb;
 
+// A dead idle socket (after a serverless freeze) emits an `error` event on the
+// underlying node-postgres pool, separate from the query path. Without a listener
+// this both spams the logs and can crash the process. Swallow the transient ones
+// quietly — the retry wrapper re-runs the actual query on a fresh connection.
+rawDb.$pool.on('error', (err: any) => {
+  if (TRANSIENT_ERROR.test(err?.message || '')) return;
+  console.error('❌ DB pool error:', err?.message || err);
+});
+
 export async function checkDatabaseConnection(): Promise<boolean> {
   try {
     await db.one('SELECT NOW()');

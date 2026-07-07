@@ -55,16 +55,26 @@ async function apiFetch(url: string, options: RequestInit = {}): Promise<Respons
 
 export const api = {
   async createPatient(data: PatientData): Promise<ApiResponse> {
+    // Abort after 25s so a hung request (e.g. a dead DB socket after a
+    // serverless cold start) surfaces as an error instead of freezing the UI.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
     try {
       const response = await apiFetch(`${API_BASE_URL}/patients`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(data),
+        signal: controller.signal,
       });
       const result = await response.json();
       return { success: response.ok, data: result, error: result.error };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      const msg = (error as any)?.name === 'AbortError'
+        ? 'Сервер не ответил вовремя. Попробуйте ещё раз.'
+        : (error instanceof Error ? error.message : 'Unknown error');
+      return { success: false, error: msg };
+    } finally {
+      clearTimeout(timeout);
     }
   },
 

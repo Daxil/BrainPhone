@@ -17,12 +17,13 @@ interface FormScreenProps {
   onBack: () => void;
   onChange: (record: PatientRecord) => void;
   onContinue: () => void;
+  submitting?: boolean;
   // Вместо API-upload: просто добавить файл в локальный record
   onAddPhotoLocal?: (file: File, category: 'consult' | 'scale') => void;
   onRemovePhoto?: (index: number) => void;
 }
 
-export default function FormScreen({ record, onBack, onChange, onContinue, onAddPhotoLocal, onRemovePhoto }: FormScreenProps) {
+export default function FormScreen({ record, onBack, onChange, onContinue, submitting, onAddPhotoLocal, onRemovePhoto }: FormScreenProps) {
   const consultRef = useRef<HTMLInputElement>(null);
   const scaleRef   = useRef<HTMLInputElement>(null);
 
@@ -248,10 +249,10 @@ export default function FormScreen({ record, onBack, onChange, onContinue, onAdd
         )}
         <button
           onClick={onContinue}
-          disabled={!isValid()}
+          disabled={!isValid() || submitting}
           className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white py-4 rounded-xl font-semibold transition-colors"
         >
-          {STRINGS.FORM_NEXT}
+          {submitting ? 'Сохранение…' : STRINGS.FORM_NEXT}
         </button>
       </div>
     </div>

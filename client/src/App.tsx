@@ -194,6 +194,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
   const [pendingSaveId, setPendingSaveId] = useState<string | null>(null);
   const [patients, setPatients] = useState<PatientRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [formSubmitting, setFormSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -336,14 +337,22 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
 
   // ── Новый флоу: форма → согласие → список заданий ────────────────────────
   const handleFormContinue = async () => {
-    if (!currentRecord || !selectedProtocol) return;
+    if (formSubmitting) return;
+    if (!currentRecord) return;
+    // Протокол мог не сохраниться в state (например, при заходе через «Редактировать») —
+    // берём запасной из самого record, чтобы кнопка не «молчала».
+    const protocol = selectedProtocol || (currentRecord.protocolType as ProtocolType | undefined);
+    if (!protocol) {
+      alert('Не выбран протокол исследования. Вернитесь назад и выберите протокол.');
+      return;
+    }
     const patientData = {
       patient_name:     currentRecord.patientName || 'Пациент',
       age:              currentRecord.age || '0',
       gender:           currentRecord.gender || 'male',
       chief_complaint:  currentRecord.diagnosis || currentRecord.chiefComplaint || '',
       notes:            currentRecord.notes || '',
-      protocol_type:    selectedProtocol,
+      protocol_type:    protocol,
       diagnosis:        currentRecord.diagnosis,
       native_language:  currentRecord.nativeLanguage,
       has_parkinsonism: currentRecord.hasParkinsonism,
@@ -353,14 +362,16 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
       trch_score:       currentRecord.trchScore,
       updrs_score:      currentRecord.updrsScore,
     };
-    const result = await api.createPatient(patientData);
+    setFormSubmitting(true);
+    const result = await api.createPatient(patientData).finally(() => setFormSubmitting(false));
     if (result.success && result.data?.data?.patient) {
       const saved = result.data.data.patient;
       if (currentRecord.photos.length > 0) {
         uploadPendingPhotos(saved.id, currentRecord.photos).catch(() => {});
       }
+      setSelectedProtocol(protocol);
       setCurrentRecord(prev => prev ? { ...prev, id: saved.id } : null);
-      const taskDefs = PROTOCOL_TASKS[selectedProtocol];
+      const taskDefs = PROTOCOL_TASKS[protocol];
       const tasks: CaseTask[] = taskDefs.map(def => ({
         id:       def.fileCode,
         taskType: def.taskType,
@@ -371,7 +382,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
       }));
       setCaseFlow({
         patientId:    saved.id,
-        protocol:     selectedProtocol,
+        protocol,
         caseStatus:   'CONSENT_PENDING',
         consent:      null,
         tasks,
@@ -695,6 +706,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
             onBack={handleBack}
             onChange={setCurrentRecord}
             onContinue={handleFormContinue}
+            submitting={formSubmitting}
             onAddPhotoLocal={handleAddPhotoLocal}
             onRemovePhoto={handleRemovePhoto}
           />

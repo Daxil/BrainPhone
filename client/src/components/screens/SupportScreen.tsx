@@ -1,6 +1,6 @@
-// E14: Поддержка — FAQ, форма обращения, отправка логов
+// E14: Поддержка — FAQ, форма обращения
 import { useState } from 'react';
-import { ChevronLeft, ChevronDown, ChevronUp, Mail, FileText, CheckCircle2 } from 'lucide-react';
+import { ChevronLeft, ChevronDown, ChevronUp, Mail, CheckCircle2 } from 'lucide-react';
 import { STRINGS } from '../../constants/ui';
 
 interface SupportScreenProps {
@@ -11,7 +11,6 @@ export default function SupportScreen({ onBack }: SupportScreenProps) {
   const [openFaq, setOpenFaq]  = useState<number | null>(null);
   const [message, setMessage]  = useState('');
   const [sent, setSent]        = useState(false);
-  const [logsSent, setLogsSent]= useState(false);
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,12 +18,6 @@ export default function SupportScreen({ onBack }: SupportScreenProps) {
     // TODO: API-вызов отправки обращения
     setSent(true);
     setMessage('');
-  };
-
-  const handleSendLogs = () => {
-    // TODO: собрать и отправить логи через API
-    setLogsSent(true);
-    setTimeout(() => setLogsSent(false), 3000);
   };
 
   return (
@@ -89,22 +82,6 @@ export default function SupportScreen({ onBack }: SupportScreenProps) {
               </button>
             </form>
           )}
-        </section>
-
-        {/* Отправка логов */}
-        <section>
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-2">{STRINGS.SUPPORT_LOGS_TITLE}</h2>
-          <p className="text-xs text-gray-400 mb-3">{STRINGS.SUPPORT_LOGS_NOTE}</p>
-          <button
-            onClick={handleSendLogs}
-            className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-medium text-sm transition-colors ${
-              logsSent ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-            }`}
-          >
-            {logsSent
-              ? <><CheckCircle2 className="w-4 h-4" /> Логи отправлены</>
-              : <><FileText className="w-4 h-4" /> {STRINGS.SUPPORT_LOGS_BTN}</>}
-          </button>
         </section>
 
       </main>
