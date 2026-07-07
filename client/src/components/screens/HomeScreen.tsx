@@ -54,7 +54,10 @@ export default function HomeScreen({
     });
   }, []);
 
-  const recent = [...(records || [])].reverse().slice(0, 20);
+  // Новые сверху, старые снизу.
+  const recent = [...(records || [])]
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+    .slice(0, 20);
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">

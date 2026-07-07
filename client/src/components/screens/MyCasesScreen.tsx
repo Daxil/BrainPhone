@@ -56,8 +56,9 @@ export default function MyCasesScreen({ records, onBack, onViewCase, onDeleteDra
     }
   };
 
+  // Новые сверху, старые снизу.
   const filtered = [...records]
-    .reverse()
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
     .filter(r => filter === 'all' || r.caseStatus === filter);
 
   return (
