@@ -1,6 +1,5 @@
 import type { AuthUser, LoginResponse, InviteInfo } from '../types/auth';
-
-const BASE = import.meta.env.VITE_API_URL || '/api';
+import { API_BASE_URL as BASE } from '../config';
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {

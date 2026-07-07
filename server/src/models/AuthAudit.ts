@@ -20,6 +20,7 @@ export type AuditEventType =
   | 'session_rejected_ua'
   | 'session_rejected_version'
   | 'rate_limit_blocked'
+  | 'totp_rate_limit_blocked'
   | 'email_sent'
   | 'email_failed';
 

@@ -22,7 +22,10 @@ import {
   revokeAllSessions,
   upgradeToFullSession,
 } from '../services/session.service';
-import { checkRateLimit, recordFailure, clearRateLimit } from '../services/rateLimit.service';
+import {
+  checkRateLimit, recordFailure, clearRateLimit,
+  checkTotpRateLimit, recordTotpFailure, clearTotpRateLimit,
+} from '../services/rateLimit.service';
 import {
   generateTotpSecret,
   decryptTotpSecret,
@@ -32,7 +35,7 @@ import {
   generateBackupCodes,
 } from '../services/totp.service';
 import { checkPassword } from '../services/pwned.service';
-import { hashIpSubnet, hashUA } from '../services/crypto.service';
+import { hashIpSubnet, hashUA, signState, verifyState } from '../services/crypto.service';
 import { sendEmail } from '../services/mailer.service';
 import { db } from '../config/database';
 import { TOTP_ENABLED } from '../config/features';
@@ -121,8 +124,9 @@ export async function login(req: Request, res: Response): Promise<void> {
   await resetFailedAttempts(user.id);
 
   if (TOTP_ENABLED && user.totp_enabled && user.totp_verified) {
-    const pending = Buffer.from(JSON.stringify({ userId: user.id, ts: Date.now() }))
-      .toString('base64url');
+    // HMAC-подписанный челлендж: userId нельзя подделать, поэтому шаг с паролем
+    // криптографически связан со вторым фактором.
+    const pending = signState({ userId: user.id, ts: Date.now() });
     res.cookie('totp_pending', pending, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -152,10 +156,9 @@ export async function loginTotp(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  let payload: { userId: string; ts: number };
-  try {
-    payload = JSON.parse(Buffer.from(pending, 'base64url').toString('utf8'));
-  } catch {
+  const payload = verifyState<{ userId: string; ts: number }>(pending);
+  if (!payload || typeof payload.userId !== 'string' || typeof payload.ts !== 'number') {
+    res.clearCookie('totp_pending', { path: '/' });
     res.status(400).json({ success: false, error: 'Invalid TOTP challenge' });
     return;
   }
@@ -166,6 +169,21 @@ export async function loginTotp(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  const ip = clientIp(req);
+  const ua = req.headers['user-agent'] || '';
+
+  // Ограничиваем перебор TOTP-кода/backup-кодов для этого пользователя.
+  const rl = await checkTotpRateLimit(payload.userId);
+  if (!rl.allowed) {
+    await logAudit({ eventType: 'totp_rate_limit_blocked', userId: payload.userId, ipAddress: ip });
+    res.status(429).json({
+      success: false,
+      error: 'Too many TOTP attempts — try again later',
+      retryAfterMs: rl.retryAfterMs,
+    });
+    return;
+  }
+
   const user = await findById(payload.userId);
   if (!user || !user.totp_secret_encrypted) {
     res.status(401).json({ success: false, error: 'Invalid challenge' });
@@ -173,8 +191,6 @@ export async function loginTotp(req: Request, res: Response): Promise<void> {
   }
 
   const { token, backupCode } = req.body;
-  const ip = clientIp(req);
-  const ua = req.headers['user-agent'] || '';
 
   let totpOk = false;
 
@@ -189,11 +205,13 @@ export async function loginTotp(req: Request, res: Response): Promise<void> {
   }
 
   if (!totpOk) {
+    await recordTotpFailure(payload.userId);
     await logAudit({ eventType: 'login_totp_failure', userId: user.id, ipAddress: ip, userAgent: ua });
     res.status(401).json({ success: false, error: 'Invalid TOTP token' });
     return;
   }
 
+  await clearTotpRateLimit(payload.userId);
   res.clearCookie('totp_pending', { path: '/' });
   const ipHash = hashIpSubnet(ip);
   const uaHash = hashUA(ua);

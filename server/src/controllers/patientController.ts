@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { db } from '../config/database';
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import ffmpeg from 'fluent-ffmpeg';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -18,6 +19,39 @@ const s3Client = new S3Client({
 
 const AUDIO_BUCKET_NAME = process.env.S3_BUCKET_NAME || 'brainphone-audio';
 const PHOTO_BUCKET_NAME = process.env.S3_PHOTO_BUCKET_NAME || 'brainphone-photos';
+
+// Медданные пациентов хранятся в приватных бакетах. Прямые ссылки не работают —
+// на чтение отдаём presigned URL с коротким TTL, чтобы запись/фото не были
+// доступны публично по угадываемому адресу.
+const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 час
+const S3_CONFIGURED = Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
+
+/** Presigned GET URL для приватного объекта. */
+async function presignGet(bucket: string, key: string): Promise<string> {
+  return getSignedUrl(s3Client, new GetObjectCommand({ Bucket: bucket, Key: key }), {
+    expiresIn: SIGNED_URL_TTL_SECONDS,
+  });
+}
+
+/**
+ * Подписать ссылку на аудио/фото по имени файла (file_path).
+ * Ключ в S3: `${prefix}/${fileName}` (audio|photos).
+ * Если S3 не сконфигурирован (dev) — возвращаем исходный fallback без подписи.
+ */
+async function signedMediaUrl(
+  bucket: string,
+  prefix: 'audio' | 'photos',
+  fileName: string | null | undefined,
+  fallback?: string | null
+): Promise<string | null> {
+  if (!fileName) return fallback ?? null;
+  if (!S3_CONFIGURED) return fallback ?? null;
+  try {
+    return await presignGet(bucket, `${prefix}/${fileName}`);
+  } catch {
+    return fallback ?? null;
+  }
+}
 
 // Allowed sort columns whitelist (prevents SQL injection via dynamic sort)
 const ALLOWED_SORT_COLS = new Set(['created_at', 'patient_name', 'updated_at']);
@@ -205,11 +239,9 @@ export const uploadAudio = async (req: Request, res: Response) => {
       Key: s3Key,
       Body: audioBuffer,
       ContentType: 'audio/flac',
-      ACL: 'public-read',
     }));
 
-    const publicUrl = `https://${AUDIO_BUCKET_NAME}.storage.yandexcloud.net/${s3Key}`;
-
+    // Храним только ключ объекта; читателям выдаём presigned URL на лету.
     const result = await db.one(
       `INSERT INTO patient_audio (
         patient_id, recording_type, recording_label, file_path,
@@ -220,9 +252,12 @@ export const uploadAudio = async (req: Request, res: Response) => {
         patient_id, recording_type, recording_label || '', fileName,
         parseFloat(duration) || 0, parseInt(sample_rate) || 48000,
         parseInt(bits_per_sample) || 16, parseInt(channels) || 1,
-        audioBuffer.length, 'completed', publicUrl,
+        audioBuffer.length, 'completed', s3Key,
       ]
     );
+
+    // Для немедленного воспроизведения после загрузки отдаём подписанную ссылку.
+    result.yandex_disk_url = await signedMediaUrl(AUDIO_BUCKET_NAME, 'audio', fileName, null);
 
     res.json({ success: true, data: { audio: result } });
   } catch (error: any) {
@@ -270,14 +305,15 @@ export const uploadPhoto = async (req: Request, res: Response) => {
       Body: buf,
       ContentType: detectedMime,
       ContentDisposition: 'attachment',
-      ACL: 'public-read',
     }));
 
-    const publicUrl = `https://${PHOTO_BUCKET_NAME}.storage.yandexcloud.net/${s3Key}`;
+    // Храним ключ объекта; читателям выдаём presigned URL на лету.
     const result = await db.one(
       `INSERT INTO patient_photos (patient_id, file_path, uploaded_at, yandex_disk_url) VALUES ($1, $2, NOW(), $3) RETURNING *`,
-      [patient_id, fileName, publicUrl]
+      [patient_id, fileName, s3Key]
     );
+
+    result.yandex_disk_url = await signedMediaUrl(PHOTO_BUCKET_NAME, 'photos', fileName, null);
 
     res.json({ success: true, data: { photo: result } });
   } catch (error: any) {
@@ -357,7 +393,7 @@ export const getAllPatients = async (req: Request, res: Response) => {
         COALESCE((
           SELECT json_agg(json_build_object(
             'id', pa.id, 'recording_type', pa.recording_type, 'recording_label', pa.recording_label,
-            'yandex_disk_url', pa.yandex_disk_url, 'duration', pa.duration,
+            'file_path', pa.file_path, 'yandex_disk_url', pa.yandex_disk_url, 'duration', pa.duration,
             'status', pa.status, 'uploaded_at', pa.uploaded_at
           ) ORDER BY pa.uploaded_at DESC)
           FROM patient_audio pa WHERE pa.patient_id = p.id
@@ -381,6 +417,16 @@ export const getAllPatients = async (req: Request, res: Response) => {
       ? await db.one('SELECT COUNT(*) FROM patients')
       : await db.one('SELECT COUNT(*) FROM patients WHERE created_by = $1', [req.user!.id]);
 
+    // Подписываем ссылки на медиа во вложенных массивах (объекты приватные).
+    await Promise.all(patients.flatMap((p) => [
+      ...(Array.isArray(p.audio_files) ? p.audio_files : []).map(async (a: any) => {
+        a.yandex_disk_url = await signedMediaUrl(AUDIO_BUCKET_NAME, 'audio', a.file_path, a.yandex_disk_url);
+      }),
+      ...(Array.isArray(p.photos) ? p.photos : []).map(async (ph: any) => {
+        ph.yandex_disk_url = await signedMediaUrl(PHOTO_BUCKET_NAME, 'photos', ph.file_path, ph.yandex_disk_url);
+      }),
+    ]));
+
     res.json({ success: true, data: { patients, total: parseInt(total.count), limit: parseInt(limit as string), offset: parseInt(offset as string) } });
   } catch (error: any) {
     console.error('Error fetching patients:', error.message);
@@ -401,6 +447,15 @@ export const getPatientById = async (req: Request, res: Response) => {
 
     const audioFiles = await db.manyOrNone('SELECT * FROM patient_audio WHERE patient_id = $1 ORDER BY uploaded_at DESC', [id]);
     const photos     = await db.manyOrNone('SELECT * FROM patient_photos WHERE patient_id = $1 ORDER BY uploaded_at DESC', [id]);
+
+    await Promise.all([
+      ...audioFiles.map(async (a) => {
+        a.yandex_disk_url = await signedMediaUrl(AUDIO_BUCKET_NAME, 'audio', a.file_path, a.yandex_disk_url);
+      }),
+      ...photos.map(async (p) => {
+        p.yandex_disk_url = await signedMediaUrl(PHOTO_BUCKET_NAME, 'photos', p.file_path, p.yandex_disk_url);
+      }),
+    ]);
 
     res.json({ success: true, data: { patient, audio_files: audioFiles, photos } });
   } catch (error: any) {

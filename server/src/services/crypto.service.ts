@@ -149,6 +149,46 @@ export function getCiphertextVersion(packed: string): string {
   return 'v1'; // legacy — assumed v1
 }
 
+// ─── Signed state cookies (HMAC-SHA256) ──────────────────────────────────────
+//
+// Для промежуточных челленджей (напр. totp_pending), где сервер кладёт в cookie
+// идентификатор пользователя. Без подписи значение можно подделать (cookie
+// подставляется напрямую, не только браузером) и пропустить парольный шаг.
+// Формат: "{base64url(payload)}.{base64url(hmac)}".
+
+function cookieSecret(): Buffer {
+  const explicit = process.env.AUTH_COOKIE_SECRET;
+  if (explicit) return Buffer.from(explicit, 'utf8');
+  // Fallback: детерминированно выводим из TOTP-ключа (он обязателен и 32 байта).
+  const base = process.env.TOTP_ENCRYPTION_KEY || process.env.TOTP_ENCRYPTION_KEYS || '';
+  if (!base) {
+    throw new Error('AUTH_COOKIE_SECRET or TOTP_ENCRYPTION_KEY required to sign auth cookies');
+  }
+  return crypto.createHash('sha256').update('auth-cookie:' + base).digest();
+}
+
+export function signState(payload: Record<string, unknown>): string {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const mac = crypto.createHmac('sha256', cookieSecret()).update(body).digest('base64url');
+  return `${body}.${mac}`;
+}
+
+export function verifyState<T>(token: string): T | null {
+  const dot = token.lastIndexOf('.');
+  if (dot <= 0) return null;
+  const body = token.slice(0, dot);
+  const mac = token.slice(dot + 1);
+  const expected = crypto.createHmac('sha256', cookieSecret()).update(body).digest('base64url');
+  const macBuf = Buffer.from(mac);
+  const expBuf = Buffer.from(expected);
+  if (macBuf.length !== expBuf.length || !crypto.timingSafeEqual(macBuf, expBuf)) return null;
+  try {
+    return JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as T;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Timing-safe comparison ──────────────────────────────────────────────────
 
 export function safeEqual(a: string, b: string): boolean {

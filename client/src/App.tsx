@@ -34,6 +34,7 @@ import InvitePage from './pages/InvitePage';
 import SetupTotpPage from './pages/SetupTotpPage';
 import AdminPage from './pages/AdminPage';
 import { ONBOARDING_KEY, PROTOCOL_TASKS } from './constants/statuses';
+import { API_BASE_URL } from './config';
 import { enqueue, startQueueProcessor } from './services/offlineQueue';
 import { saveDraft, loadDraft, clearDraft } from './services/draftCache';
 
@@ -42,8 +43,6 @@ const SUBMITTED_STATUSES = new Set(['SUBMITTED', 'ACCEPTED', 'REJECTED', 'REVIEW
 const isDraftStatus = (status?: string) => !SUBMITTED_STATUSES.has(status || '');
 // Экраны, на которых мы находимся «внутри» заполнения кейса — их и кэшируем.
 const FLOW_SCREENS: Screen[] = ['form', 'consent', 'taskList', 'recording', 'readyToSubmit'];
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 // ─── Detect special URLs handled outside the main SPA ─────────────────────────
 
@@ -106,10 +105,9 @@ function AppWithAuth() {
   // so the server's 30-min idle TTL never expires during active use.
   useEffect(() => {
     if (!user) return;
-    const BASE = import.meta.env.VITE_API_URL || '/api';
     const ping = () => {
       if (document.visibilityState === 'visible') {
-        fetch(`${BASE}/auth/me`, { credentials: 'include' }).catch(() => {});
+        fetch(`${API_BASE_URL}/auth/me`, { credentials: 'include' }).catch(() => {});
       }
     };
     const id = setInterval(ping, 10 * 60 * 1000);

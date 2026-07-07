@@ -1,5 +1,6 @@
 import pgPromise from 'pg-promise';
 import dotenv from 'dotenv';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -16,6 +17,28 @@ const needsSsl = connectionString.includes('sslmode=require');
 connectionString = connectionString
   .replace('?sslmode=require', '')
   .replace('&sslmode=require', '');
+
+// TLS к managed PG. Если задан CA-серт (DB_CA_CERT = путь к .crt) — проверяем
+// сертификат нормально. Иначе падаем обратно на rejectUnauthorized:false ТОЛЬКО
+// для БД (не глобально), чтобы self-signed серт Yandex не ронял хендшейк.
+// Раньше это делалось через NODE_TLS_REJECT_UNAUTHORIZED=0, что отключало
+// проверку для всех исходящих TLS-соединений процесса (SMTP/S3/HIBP) — риск MITM.
+function buildSslConfig(): false | { ca: string } | { rejectUnauthorized: false } {
+  if (!needsSsl) return false;
+  const caPath = process.env.DB_CA_CERT;
+  if (caPath) {
+    try {
+      return { ca: fs.readFileSync(caPath, 'utf8') };
+    } catch (e: any) {
+      console.warn(`⚠️  DB_CA_CERT set but unreadable (${e.message}) — falling back to unverified TLS`);
+    }
+  } else {
+    console.warn('⚠️  DB_CA_CERT not set — DB TLS certificate is NOT verified. Provide the Yandex CA cert in production.');
+  }
+  return { rejectUnauthorized: false };
+}
+
+const sslConfig = buildSslConfig();
 
 console.log('🔌 Connecting to database...');
 
@@ -45,7 +68,7 @@ const pgp = pgPromise({
 // sockets quickly, and enable TCP keepalive to detect dead sockets sooner.
 const rawDb = pgp({
   connectionString,
-  ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}),
+  ...(sslConfig ? { ssl: sslConfig } : {}),
   max: 4,
   idleTimeoutMillis: 5000,
   keepAlive: true,

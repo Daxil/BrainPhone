@@ -1,10 +1,7 @@
 // E0: Splash + синхронизация протоколов / QC-порогов
 import { useEffect, useState } from 'react';
 import { STRINGS } from '../../constants/ui';
-
-// Health endpoint is at /health (outside /api prefix, before auth middleware)
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
-const HEALTH_URL   = API_BASE_URL.replace(/\/api$/, '') + '/health';
+import { HEALTH_URL } from '../../config';
 
 interface SyncStep {
   label: string;

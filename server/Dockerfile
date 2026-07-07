@@ -22,7 +22,8 @@ COPY --from=builder /app/migrations ./migrations
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
-ENV NODE_TLS_REJECT_UNAUTHORIZED=0
+# НЕ отключаем TLS-проверку глобально — это касалось бы SMTP/S3/HIBP (MITM).
+# TLS к БД настраивается точечно в config/database.ts.
 ENV NODE_ENV=production
 
 EXPOSE 8080

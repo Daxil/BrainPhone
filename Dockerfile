@@ -37,8 +37,10 @@ COPY --from=frontend-builder /client/dist ./client/dist
 COPY server/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
-# NODE_TLS_REJECT_UNAUTHORIZED=0 needed for Yandex Managed PG self-signed cert
-ENV NODE_TLS_REJECT_UNAUTHORIZED=0
+# NB: НЕ отключаем TLS-проверку глобально (NODE_TLS_REJECT_UNAUTHORIZED=0) —
+# это отключало бы её и для SMTP/S3/HIBP (риск MITM). TLS к managed PG
+# настраивается точечно в config/database.ts (CA-серт через DB_CA_CERT или
+# rejectUnauthorized:false только для БД).
 ENV NODE_ENV=production
 
 # SPA lives at /app/client/dist in this image. The app's default resolves to

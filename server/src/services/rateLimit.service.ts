@@ -62,6 +62,36 @@ export async function clearRateLimit(ip: string, email: string): Promise<void> {
   await getLimiter(false).clear(loginKey(ip, email));
 }
 
+// ─── TOTP verification rate limiting ─────────────────────────────────────────
+// Ключуем по userId: к этому шагу можно попасть только с подписанной cookie
+// totp_pending (т.е. после успешного пароля), поэтому лок-аут по userId не
+// эксплуатируется для DoS, зато режет перебор 6-значного кода/backup-кодов.
+
+function totpKey(userId: string): string {
+  return sha256(`totp:${userId}`);
+}
+
+export async function checkTotpRateLimit(userId: string): Promise<RateLimitResult> {
+  try {
+    return await getLimiter(false).check(totpKey(userId), WINDOW_MS, MAX_ATTEMPTS);
+  } catch {
+    return { allowed: false, retryAfterMs: 60_000 };
+  }
+}
+
+export async function recordTotpFailure(userId: string): Promise<number> {
+  const key = totpKey(userId);
+  const limiter = getLimiter(false);
+  const attempts = await limiter.increment(key, WINDOW_MS);
+  const bo = backoffMs(attempts);
+  if (bo > 0) await limiter.block(key, bo);
+  return attempts;
+}
+
+export async function clearTotpRateLimit(userId: string): Promise<void> {
+  await getLimiter(false).clear(totpKey(userId));
+}
+
 // ─── Generic keyed rate limit (for email, 404, upload, etc.) ─────────────────
 
 /** rl:email:{userId}:{template} — max 1 per 5 min */
