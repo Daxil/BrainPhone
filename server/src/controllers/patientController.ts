@@ -489,6 +489,10 @@ export const deletePatient = async (req: Request, res: Response) => {
 
     if (!patient) return res.status(404).json({ success: false, error: 'Patient not found' });
 
+    // Remove child rows first — patient_photos has no guaranteed ON DELETE CASCADE,
+    // so a plain DELETE on patients could fail on the FK for cases with photos.
+    await db.none('DELETE FROM patient_photos WHERE patient_id = $1', [id]);
+    await db.none('DELETE FROM patient_audio  WHERE patient_id = $1', [id]);
     await db.none('DELETE FROM patients WHERE id = $1', [id]);
     res.json({ success: true, message: 'Patient deleted successfully' });
   } catch (error: any) {

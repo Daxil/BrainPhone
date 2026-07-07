@@ -122,6 +122,18 @@ export const api = {
     }
   },
 
+  async deletePatient(patientId: string): Promise<ApiResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/patients/${encodeURIComponent(patientId)}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      return { success: response.ok, data: result, error: result.error };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  },
+
   async deletePhoto(photoId: string): Promise<ApiResponse> {
     try {
       const response = await apiFetch(`${API_BASE_URL}/patients/photos/${encodeURIComponent(photoId)}`, {

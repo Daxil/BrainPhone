@@ -1,6 +1,6 @@
 // E12: Мои кейсы — фильтры, статусы, без доступа к аудио
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, FileText } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, FileText, Trash2 } from 'lucide-react';
 import { STRINGS } from '../../constants/ui';
 import type { PatientRecord } from '../../types';
 
@@ -10,7 +10,12 @@ interface MyCasesScreenProps {
   records: PatientRecord[];
   onBack: () => void;
   onViewCase: (record: PatientRecord) => void;
+  onDeleteDraft: (record: PatientRecord) => void | Promise<void>;
 }
+
+// Кейс считается черновиком, пока он не отправлен на проверку.
+const SUBMITTED_STATUSES = new Set(['SUBMITTED', 'ACCEPTED', 'REJECTED', 'REVIEW']);
+const isDraft = (status?: string) => !SUBMITTED_STATUSES.has(status || '');
 
 function statusBadge(status?: string) {
   switch (status) {
@@ -36,8 +41,20 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'REVIEW',   label: STRINGS.CASES_FILTER_REVIEW },
 ];
 
-export default function MyCasesScreen({ records, onBack, onViewCase }: MyCasesScreenProps) {
+export default function MyCasesScreen({ records, onBack, onViewCase, onDeleteDraft }: MyCasesScreenProps) {
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDelete = async (e: React.MouseEvent, rec: PatientRecord) => {
+    e.stopPropagation();
+    if (!window.confirm('Удалить черновик? Это действие нельзя отменить.')) return;
+    setDeletingId(rec.id);
+    try {
+      await onDeleteDraft(rec);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const filtered = [...records]
     .reverse()
@@ -75,13 +92,16 @@ export default function MyCasesScreen({ records, onBack, onViewCase }: MyCasesSc
             {filtered.map(rec => {
               const badge = statusBadge(rec.caseStatus);
               const rejCode = rec.rejectionCode;
+              const draft = isDraft(rec.caseStatus);
               return (
-                <button
+                <div
                   key={rec.id}
-                  onClick={() => onViewCase(rec)}
-                  className="w-full bg-white border border-gray-100 rounded-xl p-4 hover:border-blue-200 transition-colors text-left flex items-center gap-3"
+                  className="w-full bg-white border border-gray-100 rounded-xl p-4 hover:border-blue-200 transition-colors flex items-center gap-3"
                 >
-                  <div className="flex-1 min-w-0">
+                  <button
+                    onClick={() => onViewCase(rec)}
+                    className="flex-1 min-w-0 text-left"
+                  >
                     <div className="flex items-center gap-2">
                       {rec.caseNumber && <span className="text-xs font-mono text-gray-400">{rec.caseNumber}</span>}
                       <span className="text-sm font-medium text-gray-800">{protLabel(rec.protocolType)}</span>
@@ -95,12 +115,23 @@ export default function MyCasesScreen({ records, onBack, onViewCase }: MyCasesSc
                         {STRINGS.CASE_REJECTION_PREFIX}{STRINGS.REJECTION_CODES[rejCode] ?? rejCode}
                       </div>
                     )}
-                  </div>
+                  </button>
                   <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium flex-shrink-0 ${badge.cls}`}>
                     {badge.icon}<span>{badge.label}</span>
                   </div>
-                  <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
-                </button>
+                  {draft ? (
+                    <button
+                      onClick={(e) => handleDelete(e, rec)}
+                      disabled={deletingId === rec.id}
+                      title="Удалить черновик"
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors flex-shrink-0 disabled:opacity-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
+                  )}
+                </div>
               );
             })}
           </div>

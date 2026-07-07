@@ -256,6 +256,11 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
             })) || [],
             mdsUpdrs: p.mds_updrs,
             moca: p.moca,
+            caseStatus: p.case_status,
+            caseNumber: p.case_number,
+            rejectionCode: p.rejection_code,
+            rejectionNote: p.rejection_note,
+            submittedAt: p.submitted_at,
             createdAt: p.created_at,
             updatedAt: p.updated_at,
           }));
@@ -470,6 +475,15 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
     }
   };
 
+  const handleDeleteDraft = async (record: PatientRecord) => {
+    const result = await api.deletePatient(record.id);
+    if (result.success) {
+      setPatients(prev => prev.filter(p => p.id !== record.id));
+    } else {
+      alert(result.error || 'Не удалось удалить черновик');
+    }
+  };
+
   const handleNewCaseFromResult = () => {
     setCaseFlow(null);
     setCurrentRecord(null);
@@ -661,6 +675,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
             records={patients}
             onBack={() => setScreen('home')}
             onViewCase={(record) => { setCurrentRecord(record); setScreen('view'); }}
+            onDeleteDraft={handleDeleteDraft}
           />
         );
 

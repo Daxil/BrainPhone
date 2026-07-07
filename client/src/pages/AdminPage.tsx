@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { Play, Pause } from 'lucide-react';
 import { authApi } from '../services/authApi';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
@@ -35,6 +36,15 @@ interface AuditLog {
   details: any;
 }
 
+interface AdminAudio {
+  id: string | number;
+  recording_type?: string;
+  recording_label?: string;
+  yandex_disk_url?: string;
+  duration?: number;
+  status?: string;
+}
+
 interface AdminCase {
   id: string;
   case_number?: string;
@@ -46,6 +56,7 @@ interface AdminCase {
   rejection_code?: string;
   rejection_note?: string;
   doctor_email?: string;
+  audio_files?: AdminAudio[];
 }
 
 export default function AdminPage({ onBack }: { onBack: () => void }) {
@@ -60,6 +71,29 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   const [reviewCode, setReviewCode]     = useState('');
   const [reviewNote, setReviewNote]     = useState('');
   const [reviewing, setReviewing]       = useState(false);
+  const [playingId, setPlayingId]       = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const stopAudio = () => {
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    setPlayingId(null);
+  };
+
+  const handlePlayAudio = (url: string, id: string) => {
+    stopAudio();
+    if (playingId === id) return;
+    const playUrl = url.includes('yandex.net') ? `${url}?download=1` : url;
+    const audio = new Audio(playUrl);
+    audio.crossOrigin = 'anonymous';
+    audio.onended = () => { setPlayingId(null); audioRef.current = null; };
+    audio.onerror = () => { setPlayingId(null); audioRef.current = null; };
+    audio.play().then(() => {
+      setPlayingId(id);
+      audioRef.current = audio;
+    }).catch(() => setPlayingId(null));
+  };
+
+  const closeReview = () => { stopAudio(); setSelectedCase(null); };
 
   // Create invite form
   const [newEmail, setNewEmail] = useState('');
@@ -431,6 +465,44 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
               <p className="text-sm text-gray-500">
                 {selectedCase.case_number || selectedCase.id} · {selectedCase.protocol_type}
               </p>
+
+              {/* Аудиозаписи кейса */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Аудиозаписи</label>
+                {selectedCase.audio_files && selectedCase.audio_files.length > 0 ? (
+                  <div className="space-y-2 max-h-52 overflow-y-auto">
+                    {selectedCase.audio_files.map((af) => {
+                      const url = af.yandex_disk_url;
+                      const id = String(af.id);
+                      return (
+                        <div key={id} className="flex items-center justify-between gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="text-sm text-gray-800 truncate">{af.recording_label || af.recording_type || 'Запись'}</div>
+                            {af.duration ? <div className="text-xs text-gray-400">{af.duration.toFixed(1)} сек.</div> : null}
+                          </div>
+                          {url ? (
+                            <button
+                              onClick={() => handlePlayAudio(url, id)}
+                              className={`flex items-center gap-1 text-xs font-medium flex-shrink-0 ${
+                                playingId === id ? 'text-red-600 hover:text-red-700' : 'text-blue-600 hover:text-blue-700'
+                              }`}
+                            >
+                              {playingId === id
+                                ? <><Pause className="w-4 h-4" /> Стоп</>
+                                : <><Play className="w-4 h-4" /> Прослушать</>}
+                            </button>
+                          ) : (
+                            <span className="text-xs text-gray-400 flex-shrink-0">нет файла</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400">Нет аудиозаписей</p>
+                )}
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Статус</label>
                 <div className="flex gap-2">
@@ -470,7 +542,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                 </div>
               )}
               <div className="flex gap-3 pt-2">
-                <button onClick={() => setSelectedCase(null)} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium">
+                <button onClick={closeReview} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium">
                   Отмена
                 </button>
                 <button
@@ -479,7 +551,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                     setReviewing(true);
                     await api.reviewCase(selectedCase.id, reviewStatus, reviewCode || undefined, reviewNote || undefined);
                     setCases(prev => prev.map(c => c.id === selectedCase.id ? { ...c, case_status: reviewStatus, rejection_code: reviewCode } : c));
-                    setSelectedCase(null);
+                    closeReview();
                     setReviewing(false);
                   }}
                   className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium disabled:bg-gray-200 disabled:text-gray-400"
