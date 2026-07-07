@@ -35,6 +35,13 @@ import SetupTotpPage from './pages/SetupTotpPage';
 import AdminPage from './pages/AdminPage';
 import { ONBOARDING_KEY, PROTOCOL_TASKS } from './constants/statuses';
 import { enqueue, startQueueProcessor } from './services/offlineQueue';
+import { saveDraft, loadDraft, clearDraft } from './services/draftCache';
+
+// Кейс считается черновиком, пока он не отправлен на проверку.
+const SUBMITTED_STATUSES = new Set(['SUBMITTED', 'ACCEPTED', 'REJECTED', 'REVIEW']);
+const isDraftStatus = (status?: string) => !SUBMITTED_STATUSES.has(status || '');
+// Экраны, на которых мы находимся «внутри» заполнения кейса — их и кэшируем.
+const FLOW_SCREENS: Screen[] = ['form', 'consent', 'taskList', 'recording', 'readyToSubmit'];
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://bba8vah5ofa4lbqtm3sb.containers.yandexcloud.net/api';
 
@@ -257,6 +264,17 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
             })) || [],
             mdsUpdrs: p.mds_updrs,
             moca: p.moca,
+            // Поля анкеты — нужны, чтобы черновик открывался с заполненными данными
+            diagnosis:        p.diagnosis || '',
+            nativeLanguage:   p.native_language || '',
+            hasParkinsonism:  p.has_parkinsonism === true || p.has_parkinsonism === 'true',
+            hasCognitive:     p.has_cognitive === true || p.has_cognitive === 'true',
+            parkinsonismStage: p.parkinsonism_stage || '',
+            comorbidities:    p.comorbidities || '',
+            mocaScore:        p.moca_score  ?? '',
+            mmseScore:        p.mmse_score  ?? '',
+            trchScore:        p.trch_score  ?? '',
+            updrsScore:       p.updrs_score ?? '',
             caseStatus: p.case_status,
             caseNumber: p.case_number,
             rejectionCode: p.rejection_code,
@@ -277,6 +295,85 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
     };
     loadPatients();
   }, []);
+
+  // Автосохранение черновика в localStorage — по одному ключу на пациента.
+  // Пишем только когда находимся «внутри» заполнения кейса и известен id пациента.
+  useEffect(() => {
+    if (!user || !currentRecord) return;
+    if (!FLOW_SCREENS.includes(screen)) return;
+    const pid = caseFlow?.patientId || currentRecord.id;
+    if (!pid) return;
+    // Кэшируем только кейсы, уже существующие на сервере (иначе их всё равно
+    // не видно в списке и нечего «продолжать»).
+    const onServer = !!caseFlow?.patientId || patients.some((p) => p.id === pid);
+    if (!onServer) return;
+    saveDraft(user.id, pid, {
+      record: currentRecord,
+      caseFlow,
+      protocol: selectedProtocol,
+      screen,
+      savedAt: new Date().toISOString(),
+    });
+  }, [user, screen, currentRecord, caseFlow, selectedProtocol]);
+
+  // Открыть кейс: отправленный — на просмотр; черновик — продолжить с места остановки.
+  const handleOpenCase = (record: PatientRecord) => {
+    if (!isDraftStatus(record.caseStatus)) {
+      setCurrentRecord(record);
+      setScreen('view');
+      return;
+    }
+
+    // 1) Есть локальный кэш — восстанавливаем ровно то состояние, что было.
+    const cached = user ? loadDraft(user.id, record.id) : null;
+    if (cached) {
+      setCurrentRecord(cached.record);
+      setCaseFlow(cached.caseFlow);
+      setSelectedProtocol((cached.protocol as ProtocolType) || (record.protocolType as ProtocolType) || null);
+      setActiveTaskId(null);
+      setScreen(FLOW_SCREENS.includes(cached.screen) ? cached.screen : 'taskList');
+      return;
+    }
+
+    // 2) Кэша нет (другое устройство / очищен) — восстанавливаем из серверных данных.
+    const protocol = (record.protocolType as ProtocolType) || null;
+    setCurrentRecord(record);
+    setSelectedProtocol(protocol);
+    setActiveTaskId(null);
+
+    if (!protocol) {
+      setCaseFlow(null);
+      setScreen('form');
+      return;
+    }
+
+    const recordedByCode = new Map((record.audioRecordings || []).map((a) => [a.type, a]));
+    const tasks: CaseTask[] = PROTOCOL_TASKS[protocol].map((def) => {
+      const rec = recordedByCode.get(def.fileCode);
+      return {
+        id:       def.fileCode,
+        taskType: def.taskType,
+        label:    def.label,
+        fileCode: def.fileCode,
+        required: def.required,
+        status:   rec ? ('RECORDED_LOCAL' as const) : ('NOT_RECORDED' as const),
+        duration: rec?.duration,
+        uploadedUrl: rec?.url,
+      };
+    });
+    const hasRecordings = (record.audioRecordings || []).length > 0;
+    const consentDone = hasRecordings || record.caseStatus === 'RECORDING' || record.caseStatus === 'READY_TO_SUBMIT';
+    setCaseFlow({
+      patientId:    record.id,
+      protocol,
+      caseStatus:   (record.caseStatus as any) || 'DRAFT',
+      consent:      null,
+      tasks,
+      activeTaskId: null,
+    });
+    // Если согласие уже давалось — сразу к списку заданий, иначе к анкете.
+    setScreen(consentDone ? 'taskList' : 'form');
+  };
 
   const handleBack = () => {
     if (screen === 'capture') {
@@ -362,8 +459,14 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
       trch_score:       currentRecord.trchScore,
       updrs_score:      currentRecord.updrsScore,
     };
+    // Если кейс уже существует на сервере (продолжаем черновик) — обновляем,
+    // а не создаём заново, иначе плодятся дубликаты.
+    const existsOnServer = patients.some((p) => p.id === currentRecord.id);
     setFormSubmitting(true);
-    const result = await api.createPatient(patientData).finally(() => setFormSubmitting(false));
+    const result = existsOnServer
+      ? await api.updatePatient(currentRecord.id, patientData).finally(() => setFormSubmitting(false))
+      : await api.createPatient(patientData).finally(() => setFormSubmitting(false));
+
     if (result.success && result.data?.data?.patient) {
       const saved = result.data.data.patient;
       if (currentRecord.photos.length > 0) {
@@ -371,24 +474,25 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
       }
       setSelectedProtocol(protocol);
       setCurrentRecord(prev => prev ? { ...prev, id: saved.id } : null);
-      const taskDefs = PROTOCOL_TASKS[protocol];
-      const tasks: CaseTask[] = taskDefs.map(def => ({
-        id:       def.fileCode,
-        taskType: def.taskType,
-        label:    def.label,
-        fileCode: def.fileCode,
-        required: def.required,
-        status:   'NOT_RECORDED' as const,
-      }));
-      setCaseFlow({
-        patientId:    saved.id,
-        protocol,
-        caseStatus:   'CONSENT_PENDING',
-        consent:      null,
-        tasks,
-        activeTaskId: null,
+      setPatients(prev => prev.map(p => p.id === saved.id ? { ...p, ...currentRecord, id: saved.id, protocolType: protocol } : p));
+      setCaseFlow(prev => {
+        // Продолжаем существующий флоу того же пациента — сохраняем прогресс заданий/согласия.
+        if (prev && prev.patientId === saved.id) {
+          return { ...prev, protocol };
+        }
+        const tasks: CaseTask[] = PROTOCOL_TASKS[protocol].map(def => ({
+          id:       def.fileCode,
+          taskType: def.taskType,
+          label:    def.label,
+          fileCode: def.fileCode,
+          required: def.required,
+          status:   'NOT_RECORDED' as const,
+        }));
+        return { patientId: saved.id, protocol, caseStatus: 'CONSENT_PENDING', consent: null, tasks, activeTaskId: null };
       });
-      setScreen('consent');
+      // Если согласие уже есть — сразу к заданиям, иначе к экрану согласия.
+      const consentDone = caseFlow?.patientId === saved.id && !!caseFlow?.consent;
+      setScreen(consentDone ? 'taskList' : 'consent');
     } else {
       const errDetail = result.error || result.data?.error || 'неизвестная ошибка';
       alert(`Не удалось сохранить данные пациента\n\n${errDetail}`);
@@ -463,6 +567,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
     if (!caseFlow) return;
     if (isOffline) {
       enqueue(caseFlow.patientId);
+      if (user) clearDraft(user.id, caseFlow.patientId);
       setCaseFlow(prev => prev ? { ...prev, caseStatus: 'SUBMITTED' } : null);
       setFinalCaseStatus('SUBMITTED');
       setScreen('caseResult');
@@ -472,6 +577,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
     if (result.success) {
       const cn  = result.data?.data?.caseNumber;
       const st  = result.data?.data?.caseStatus || 'SUBMITTED';
+      if (user) clearDraft(user.id, caseFlow.patientId);
       setFinalCaseStatus(st);
       setFinalCaseNumber(cn);
       setFinalRejectionCode(undefined);
@@ -489,6 +595,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
   const handleDeleteDraft = async (record: PatientRecord) => {
     const result = await api.deletePatient(record.id);
     if (result.success) {
+      if (user) clearDraft(user.id, record.id);
       setPatients(prev => prev.filter(p => p.id !== record.id));
     } else {
       alert(result.error || 'Не удалось удалить черновик');
@@ -672,7 +779,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
           <HomeScreen
             records={patients}
             loading={loading}
-            onViewRecord={(record) => { setCurrentRecord(record); setScreen('view'); }}
+            onViewRecord={handleOpenCase}
             onCreateNew={handleNewPatient}
             onOpenSupport={() => setScreen('support')}
             onOpenMyCases={() => setScreen('myCases')}
@@ -685,7 +792,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
           <MyCasesScreen
             records={patients}
             onBack={() => setScreen('home')}
-            onViewCase={(record) => { setCurrentRecord(record); setScreen('view'); }}
+            onViewCase={handleOpenCase}
             onDeleteDraft={handleDeleteDraft}
           />
         );
@@ -830,7 +937,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
             onBack={handleBack}
             onCreateMDSUPDRS={() => {}}
             onCreateMoCA={() => {}}
-            onViewRecord={(record) => { setCurrentRecord(record); setScreen('view'); }}
+            onViewRecord={handleOpenCase}
           />
         );
 
@@ -839,7 +946,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
           <HomeScreen
             records={patients}
             loading={loading}
-            onViewRecord={(record) => { setCurrentRecord(record); setScreen('view'); }}
+            onViewRecord={handleOpenCase}
             onCreateNew={handleNewPatient}
             onOpenSupport={() => setScreen('support')}
             onOpenMyCases={() => setScreen('myCases')}

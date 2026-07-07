@@ -463,12 +463,22 @@ export const updatePatient = async (req: Request, res: Response) => {
         comorbidities      = COALESCE($12, comorbidities),
         diagnosis          = COALESCE($13, diagnosis),
         moca_score         = COALESCE($14, moca_score),
+        native_language    = COALESCE($15, native_language),
+        has_parkinsonism   = COALESCE($16, has_parkinsonism),
+        has_cognitive      = COALESCE($17, has_cognitive),
+        mmse_score         = COALESCE($18, mmse_score),
+        trch_score         = COALESCE($19, trch_score),
+        updrs_score        = COALESCE($20, updrs_score),
         updated_at         = NOW()
        WHERE id = $1 RETURNING *`,
       [id, updates.patient_name, updates.age, updates.gender, updates.chief_complaint,
        updates.notes, updates.blood_pressure, updates.heart_rate, updates.temperature,
        updates.protocol_type, updates.parkinsonism_stage, updates.comorbidities,
-       updates.diagnosis, updates.moca_score]
+       updates.diagnosis, updates.moca_score,
+       updates.native_language,
+       updates.has_parkinsonism === undefined ? null : (updates.has_parkinsonism === true || updates.has_parkinsonism === 'true'),
+       updates.has_cognitive === undefined ? null : (updates.has_cognitive === true || updates.has_cognitive === 'true'),
+       updates.mmse_score, updates.trch_score, updates.updrs_score]
     );
 
     res.json({ success: true, data: { patient: updated } });

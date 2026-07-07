@@ -102,6 +102,20 @@ export const api = {
     }
   },
 
+  async updatePatient(patientId: string, data: Partial<PatientData>): Promise<ApiResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/patients/${encodeURIComponent(patientId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await response.json();
+      return { success: response.ok, data: result, error: result.error };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  },
+
   async getPatients(): Promise<ApiResponse> {
     try {
       const response = await apiFetch(`${API_BASE_URL}/patients`);
