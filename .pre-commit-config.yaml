@@ -1,17 +1,22 @@
 # Pre-commit hooks. Catches secrets locally before they're committed — a left-shift of the
-# CI gitleaks gate (same pinned 8.30.1 and the repo's .gitleaks.toml allowlist).
+# CI gitleaks gate (uses the repo's .gitleaks.toml allowlist). Runs the pinned
+# zricethezav/gitleaks:v8.30.1 Docker image (same one used in CI/local scans), so there is
+# no local compile and the version is fixed for everyone.
 #
-# One-time setup per clone:
+# One-time setup per clone (needs Docker running):
 #   pipx install pre-commit    # or: sudo apt install pre-commit
 #   pre-commit install
 # Auto-install the hook on future clones (once per machine):
 #   git config --global init.templateDir ~/.git-template
 #   pre-commit init-templatedir ~/.git-template
 #
-# The hook runs `gitleaks protect --staged` on every commit (scans only staged changes, fast).
+# The hook runs `gitleaks protect --staged` on every commit (staged changes only, fast).
 # Bypass — not recommended — with `git commit --no-verify`. The CI gate remains the source of truth.
 repos:
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.30.1
+  - repo: local
     hooks:
       - id: gitleaks
+        name: gitleaks (secret scan)
+        entry: zricethezav/gitleaks:v8.30.1 protect --staged --redact --no-banner
+        language: docker_image
+        pass_filenames: false
