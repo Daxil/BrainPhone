@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { hasAdminRights } from './types/auth';
 import { api } from './services/api';
 import { useAudioRecorder } from './hooks/useAudioRecorder';
 import { formatTime, formatFileSize, generatePatientId } from './utils/dataUtils';
@@ -98,7 +99,7 @@ function AppWithAuth() {
   const resolveAuthScreen = (): AuthScreen => {
     if (inviteToken) return 'invite';
     if (!user)       return 'login';
-    if (user.role === 'admin' && isAdminPath()) return 'admin';
+    if (hasAdminRights(user.role) && isAdminPath()) return 'admin';
     if (!hasOnboarding(user.id)) return 'onboarding';
     return 'app';
   };
@@ -172,7 +173,7 @@ function AppWithAuth() {
   }
 
   // Админ: обязательная настройка TOTP
-  if (user.role === 'admin' && user.totpEnabled && !user.totpVerified) {
+  if (hasAdminRights(user.role) && user.totpEnabled && !user.totpVerified) {
     return (
       <SetupTotpPage
         mandatory
@@ -187,14 +188,14 @@ function AppWithAuth() {
       <OnboardingScreen
         onComplete={() => {
           markOnboarding(user.id);
-          setAuthScreen(user.role === 'admin' && isAdminPath() ? 'admin' : 'app');
+          setAuthScreen(hasAdminRights(user.role) && isAdminPath() ? 'admin' : 'app');
         }}
       />
     );
   }
 
   // Панель администратора
-  if (authScreen === 'admin' || (user.role === 'admin' && isAdminPath())) {
+  if (authScreen === 'admin' || (hasAdminRights(user.role) && isAdminPath())) {
     return (
       <AdminPage onBack={() => { window.history.pushState(null, '', '/'); setAuthScreen('app'); }} />
     );
@@ -1021,7 +1022,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
       {/* Офлайн-баннер */}
       <OfflineBanner initialOffline={isOffline} />
       {/* Кнопка перехода в панель администратора */}
-      {user?.role === 'admin' && screen === 'home' && (
+      {hasAdminRights(user?.role) && screen === 'home' && (
         <div className="fixed top-2 right-2 z-50">
           <button
             onClick={onGoAdmin}

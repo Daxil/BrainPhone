@@ -1,4 +1,5 @@
 import { useState, useEffect, FormEvent } from 'react';
+import { hasAdminRights, ROLE_LABELS } from '../types/auth';
 import { authApi } from '../services/authApi';
 import type { InviteInfo } from '../types/auth';
 import SetupTotpPage from './SetupTotpPage';
@@ -85,7 +86,7 @@ export default function InvitePage({ token, onComplete }: Props) {
     return (
       <SetupTotpPage
         onComplete={() => { setStep('done'); setTimeout(onComplete, 1500); }}
-        mandatory={invite?.role === 'admin'}
+        mandatory={hasAdminRights(invite?.role)}
       />
     );
   }
@@ -114,7 +115,7 @@ export default function InvitePage({ token, onComplete }: Props) {
           {invite && (
             <p className="text-gray-500 mt-1 text-sm">
               Аккаунт: <span className="font-medium">{invite.email}</span>
-              {' '}(<span className="capitalize">{invite.role === 'admin' ? 'Администратор' : 'Врач'}</span>)
+              {' '}(<span className="capitalize">{ROLE_LABELS[invite.role] ?? invite.role}</span>)
             </p>
           )}
         </div>

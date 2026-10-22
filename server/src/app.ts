@@ -16,6 +16,7 @@ import { originCheck } from './middleware/origin.middleware';
 import patientRoutes from './routes/patientRoutes';
 import authRoutes from './routes/auth.routes';
 import adminRoutes from './routes/admin.routes';
+import datasetRoutes from './routes/dataset.routes';
 import { purgeExpiredSessions } from './models/Session';
 import { verifySmtp, startMailWorker } from './services/mailer.service';
 import { check404RateLimit } from './services/rateLimit.service';
@@ -50,7 +51,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Accept', 'Authorization'],
+    // X-Requested-With / X-BP-Step-Up — для API разметки датасета (strictCsrf, step-up).
+    allowedHeaders: ['Content-Type', 'Accept', 'Authorization', 'X-Requested-With', 'X-BP-Step-Up'],
   })(req, res, next);
 });
 
@@ -126,6 +128,7 @@ app.use(originCheck);
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.use('/api/auth',     authRoutes);
 app.use('/api/admin',    adminRoutes);
+app.use('/api/dataset',  datasetRoutes);
 app.use('/api/patients', patientRoutes);
 
 // ─── SPA static (production only) ────────────────────────────────────────────

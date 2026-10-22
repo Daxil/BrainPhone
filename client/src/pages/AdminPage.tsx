@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
+import { ROLE_LABELS, type UserRole } from '../types/auth';
 import { Play, Pause } from 'lucide-react';
 import { authApi } from '../services/authApi';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
 import { STRINGS } from '../constants/ui';
+import DatasetTab from '../components/admin/DatasetTab';
+import { datasetApi } from '../services/datasetApi';
 
-type Tab = 'users' | 'invites' | 'audit' | 'cases-phonemes' | 'cases-speech' | 'cases-full';
+type Tab = 'users' | 'invites' | 'audit' | 'cases-phonemes' | 'cases-speech' | 'cases-full' | 'dataset';
 
 interface Invite {
   id: string;
@@ -72,6 +75,8 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   const [reviewNote, setReviewNote]     = useState('');
   const [reviewing, setReviewing]       = useState(false);
   const [playingId, setPlayingId]       = useState<string | null>(null);
+  // Вкладка разметки датасета видна только супер-админам (решает сервер).
+  const [datasetAllowed, setDatasetAllowed] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const stopAudio = () => {
@@ -131,7 +136,11 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
     }
   };
 
-  useEffect(() => { loadData(); }, [tab]);
+  useEffect(() => { if (tab !== 'dataset') loadData(); }, [tab]);
+
+  useEffect(() => {
+    datasetApi.access().then((r) => setDatasetAllowed(!!(r.ok && r.data?.allowed)));
+  }, []);
 
   const handleCreateInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,10 +190,13 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
         </div>
       </header>
 
-      <div className="max-w-5xl mx-auto p-4">
+      <div className={`${tab === 'dataset' ? 'max-w-7xl' : 'max-w-5xl'} mx-auto p-4`}>
         {/* Tabs */}
         <div className="flex gap-1 mb-6 bg-white rounded-lg border border-gray-200 p-1 flex-wrap">
-          {(['users', 'invites', 'audit', 'cases-phonemes', 'cases-speech', 'cases-full'] as Tab[]).map((t) => (
+          {([
+            'users', 'invites', 'audit', 'cases-phonemes', 'cases-speech', 'cases-full',
+            ...(datasetAllowed ? ['dataset'] : []),
+          ] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -197,10 +209,13 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                 : t === 'audit'   ? 'Журнал'
                 : t === 'cases-phonemes' ? 'Фонемы'
                 : t === 'cases-speech'   ? 'Речь'
+                : t === 'dataset'        ? 'Разметка датасета'
                 : 'Полный'}
             </button>
           ))}
         </div>
+
+        {tab === 'dataset' && datasetAllowed && <DatasetTab />}
 
         {/* Create invite form */}
         {tab === 'invites' && (
@@ -276,9 +291,10 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                       <td className="px-4 py-3 text-gray-900">{u.email}</td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                          u.role === 'superadmin' ? 'bg-red-100 text-red-700'
+                            : u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
                         }`}>
-                          {u.role === 'admin' ? 'Администратор' : 'Врач'}
+                          {ROLE_LABELS[u.role as UserRole] ?? u.role}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -339,7 +355,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                 {invites.map((inv) => (
                   <tr key={inv.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-900">{inv.email}</td>
-                    <td className="px-4 py-3 text-gray-600 capitalize">{inv.role === 'admin' ? 'Администратор' : 'Врач'}</td>
+                    <td className="px-4 py-3 text-gray-600 capitalize">{ROLE_LABELS[inv.role as UserRole] ?? inv.role}</td>
                     <td className="px-4 py-3 text-gray-600">{new Date(inv.expiresAt || (inv as any).expires_at).toLocaleString('ru-RU')}</td>
                     <td className="px-4 py-3">
                       {inv.used_at

@@ -5,7 +5,7 @@ export interface UserRow {
   id: string;
   email: string;
   password_hash: string | null;
-  role: 'admin' | 'doctor';
+  role: 'superadmin' | 'admin' | 'doctor';
   totp_secret_encrypted: string | null;
   totp_secret_key_version: string | null;
   totp_enabled: boolean;

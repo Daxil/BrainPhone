@@ -22,7 +22,15 @@ export type AuditEventType =
   | 'rate_limit_blocked'
   | 'totp_rate_limit_blocked'
   | 'email_sent'
-  | 'email_failed';
+  | 'email_failed'
+  | 'role_changed'
+  | 'dataset_access_denied'
+  | 'dataset_csrf_rejected'
+  | 'dataset_step_up_success'
+  | 'dataset_step_up_failure'
+  | 'dataset_annotation_saved'
+  | 'dataset_audio_deleted'
+  | 'dataset_export';
 
 export interface AuditParams {
   eventType: AuditEventType;

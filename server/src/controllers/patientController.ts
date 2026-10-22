@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { hasAdminRights } from '../middleware/requireRole';
 import { db } from '../config/database';
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -59,7 +60,7 @@ const ALLOWED_SORT_COLS = new Set(['created_at', 'patient_name', 'updated_at']);
 // Helper: IDOR ownership filter.
 // Admin sees everything; doctor sees only their own patients.
 function ownerFilter(req: Request): { clause: string; params: unknown[] } {
-  if (req.user?.role === 'admin') return { clause: '', params: [] };
+  if (hasAdminRights(req.user?.role)) return { clause: '', params: [] };
   return { clause: 'AND p.created_by = $', params: [req.user!.id] };
 }
 
@@ -69,7 +70,7 @@ function ownerFilterSimple(req: Request, alias = ''): {
   value: string | undefined;
 } {
   const col = alias ? `${alias}.created_by` : 'created_by';
-  if (req.user?.role === 'admin') return { clause: '', value: undefined };
+  if (hasAdminRights(req.user?.role)) return { clause: '', value: undefined };
   return { clause: `AND ${col} = `, value: req.user!.id };
 }
 
@@ -205,7 +206,7 @@ export const uploadAudio = async (req: Request, res: Response) => {
     if (!patient) {
       return res.status(404).json({ success: false, error: 'Patient not found' });
     }
-    if (req.user!.role !== 'admin' && patient.created_by !== req.user!.id) {
+    if (!hasAdminRights(req.user!.role) && patient.created_by !== req.user!.id) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
 
@@ -289,7 +290,7 @@ export const uploadPhoto = async (req: Request, res: Response) => {
     // IDOR: verify patient belongs to current user
     const patient = await db.oneOrNone('SELECT id, created_by FROM patients WHERE id = $1', [patient_id]);
     if (!patient) return res.status(404).json({ success: false, error: 'Patient not found' });
-    if (req.user!.role !== 'admin' && patient.created_by !== req.user!.id) {
+    if (!hasAdminRights(req.user!.role) && patient.created_by !== req.user!.id) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
 
@@ -333,7 +334,7 @@ export const deleteAudioRecording = async (req: Request, res: Response) => {
     );
 
     if (!recording) return res.status(404).json({ success: false, error: 'Recording not found' });
-    if (req.user!.role !== 'admin' && recording.patient_owner !== req.user!.id) {
+    if (!hasAdminRights(req.user!.role) && recording.patient_owner !== req.user!.id) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
 
@@ -365,7 +366,7 @@ export const deletePhoto = async (req: Request, res: Response) => {
     );
 
     if (!photo) return res.status(404).json({ success: false, error: 'Photo not found' });
-    if (req.user!.role !== 'admin' && photo.patient_owner !== req.user!.id) {
+    if (!hasAdminRights(req.user!.role) && photo.patient_owner !== req.user!.id) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
 
@@ -386,7 +387,7 @@ export const deletePhoto = async (req: Request, res: Response) => {
 export const getAllPatients = async (req: Request, res: Response) => {
   try {
     const { limit = 50, offset = 0 } = req.query;
-    const isAdmin = req.user!.role === 'admin';
+    const isAdmin = hasAdminRights(req.user!.role);
 
     const baseQuery = `
       SELECT p.*,
@@ -437,7 +438,7 @@ export const getAllPatients = async (req: Request, res: Response) => {
 export const getPatientById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const isAdmin = req.user!.role === 'admin';
+    const isAdmin = hasAdminRights(req.user!.role);
 
     const patient = isAdmin
       ? await db.oneOrNone('SELECT * FROM patients WHERE id = $1', [id])
@@ -471,7 +472,7 @@ export const searchPatients = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Search query is required' });
     }
 
-    const isAdmin = req.user!.role === 'admin';
+    const isAdmin = hasAdminRights(req.user!.role);
     const like = `%${query}%`;
 
     const patients = isAdmin
@@ -495,7 +496,7 @@ export const updatePatient = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const updates = req.body;
-    const isAdmin = req.user!.role === 'admin';
+    const isAdmin = hasAdminRights(req.user!.role);
 
     const patient = isAdmin
       ? await db.oneOrNone('SELECT id FROM patients WHERE id = $1', [id])
@@ -546,7 +547,7 @@ export const updatePatient = async (req: Request, res: Response) => {
 export const deletePatient = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const isAdmin = req.user!.role === 'admin';
+    const isAdmin = hasAdminRights(req.user!.role);
 
     const patient = isAdmin
       ? await db.oneOrNone('SELECT id FROM patients WHERE id = $1', [id])
@@ -578,7 +579,7 @@ export const saveConsent = async (req: Request, res: Response) => {
       [id]
     );
     if (!patient) return res.status(404).json({ success: false, error: 'Кейс не найден' });
-    if (req.user!.role !== 'admin' && patient.created_by !== req.user!.id) {
+    if (!hasAdminRights(req.user!.role) && patient.created_by !== req.user!.id) {
       return res.status(403).json({ success: false, error: 'Нет доступа' });
     }
 
@@ -627,7 +628,7 @@ export const saveCognitiveIntake = async (req: Request, res: Response) => {
 
     const patient = await db.oneOrNone('SELECT id, created_by FROM patients WHERE id = $1', [id]);
     if (!patient) return res.status(404).json({ success: false, error: 'Кейс не найден' });
-    if (req.user!.role !== 'admin' && patient.created_by !== req.user!.id) {
+    if (!hasAdminRights(req.user!.role) && patient.created_by !== req.user!.id) {
       return res.status(403).json({ success: false, error: 'Нет доступа' });
     }
 
@@ -701,7 +702,7 @@ export const submitCase = async (req: Request, res: Response) => {
       [id]
     );
     if (!patient) return res.status(404).json({ success: false, error: 'Кейс не найден' });
-    if (req.user!.role !== 'admin' && patient.created_by !== req.user!.id) {
+    if (!hasAdminRights(req.user!.role) && patient.created_by !== req.user!.id) {
       return res.status(403).json({ success: false, error: 'Нет доступа' });
     }
 
@@ -735,7 +736,7 @@ export const submitCase = async (req: Request, res: Response) => {
 export const getTodayStats = async (req: Request, res: Response) => {
   try {
     const doctorId = req.user!.id;
-    const isAdmin  = req.user!.role === 'admin';
+    const isAdmin  = hasAdminRights(req.user!.role);
 
     const ownerClause = isAdmin ? '' : 'AND created_by = $1';
     const params: any[] = isAdmin ? [] : [doctorId];
@@ -767,7 +768,7 @@ export const getTodayStats = async (req: Request, res: Response) => {
 
 export const reviewCase = async (req: Request, res: Response) => {
   try {
-    if (req.user!.role !== 'admin') {
+    if (!hasAdminRights(req.user!.role)) {
       return res.status(403).json({ success: false, error: 'Только администратор' });
     }
     const { id } = req.params;

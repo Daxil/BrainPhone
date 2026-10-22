@@ -8,7 +8,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 
-function getAllowedOrigins(req: Request): Set<string> {
+export function getAllowedOrigins(req: Request): Set<string> {
   const env = process.env.ALLOWED_ORIGINS || '';
   const defaults = ['http://localhost:5173', 'http://localhost:3000'];
   const explicit: string[] = env ? env.split(',').map((o) => o.trim()).filter(Boolean) : defaults;
