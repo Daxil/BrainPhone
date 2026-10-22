@@ -21,15 +21,15 @@ export default function SupportScreen({ onBack }: SupportScreenProps) {
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-      <div className="border-b border-gray-100 px-5 py-4 flex items-center gap-3 flex-shrink-0">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="border-b border-[#e9ebfc] bg-white px-5 py-4 flex items-center gap-3 flex-shrink-0">
         <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-gray-100">
           <ChevronLeft className="w-5 h-5 text-gray-600" />
         </button>
         <h1 className="font-semibold text-gray-900">{STRINGS.SUPPORT_TITLE}</h1>
       </div>
 
-      <main className="flex-1 overflow-y-auto px-5 py-6 space-y-8">
+      <main className="mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-5 py-6 space-y-8">
 
         {/* FAQ */}
         <section>

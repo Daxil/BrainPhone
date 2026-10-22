@@ -1,4 +1,4 @@
-import type { MDSUPDRSForm, MoCATest, AudioRecording } from './forms';
+import type { MDSUPDRSForm, MoCATest, AudioRecording, CognitiveIntake } from './forms';
 
 export type RecordingState = 'idle' | 'recording' | 'paused' | 'completed';
 export type SyncStatus = 'synced' | 'syncing' | 'error' | 'pending';
@@ -7,6 +7,7 @@ export type Screen =
   | 'protocolSelect'
   | 'form'
   | 'consent'
+  | 'cognitiveIntake'
   | 'taskList'
   | 'recording'
   | 'readyToSubmit'
@@ -52,6 +53,7 @@ export interface PatientRecord {
   // v2 fields
   hasParkinsonism?: boolean;
   hasCognitive?: boolean;
+  cognitiveIntake?: CognitiveIntake;
   diagnosis?: string;
   nativeLanguage?: string;
   cogMotorTest?: string;

@@ -148,3 +148,58 @@ export interface PatientAssessment {
   createdAt: string;
   updatedAt: string;
 }
+
+// Когнитивная анкета (как в brainphone-pro): приём, информант, GPCOG.
+export const GPCOG_QUESTIONS: { id: string; text: string }[] = [
+  { id: 'q1', text: 'Этому пациенту сейчас труднее, чем раньше, вспоминать то, что произошло недавно?' },
+  { id: 'q2', text: 'Ему (ей) труднее вспоминать разговор несколько дней спустя?' },
+  { id: 'q3', text: 'В разговоре труднее подыскивать правильные слова, чаще использует неуместные слова?' },
+  { id: 'q4', text: 'Уменьшилась ли способность решать денежные и финансовые вопросы?' },
+  { id: 'q5', text: 'Уменьшилась ли способность независимо управляться с лекарствами?' },
+  { id: 'q6', text: 'Требуется ли дополнительная помощь с транспортом?' },
+];
+
+export type GpcogAnswer = 'yes' | 'no' | 'unknown' | 'notApplicable';
+
+export const GPCOG_ANSWER_LABELS: Record<GpcogAnswer, string> = {
+  yes: 'Да',
+  no: 'Нет',
+  unknown: 'Не знаю',
+  notApplicable: 'Неприменимо',
+};
+
+/** «Да» — информант заметил ухудшение — 0 баллов, любой другой ответ — 1. */
+export const gpcogAnswerScore = (a: GpcogAnswer): number => (a === 'yes' ? 0 : 1);
+
+export const INTAKE_CHECKS: { id: string; text: string }[] = [
+  { id: 'hearing', text: 'Пациент слышит и понимает инструкцию и способен выполнить задание' },
+  { id: 'vision', text: 'Пациент видит изображение и способен различать его основные элементы (возможно использование средств коррекции зрения)' },
+  { id: 'noDelirium', text: 'Отсутствуют остро возникшее спутанное состояние, делирий, интоксикация, абстинентное состояние или выраженная седация' },
+  { id: 'noAcuteCondition', text: 'Отсутствует острое состояние, влияющее на внимание, сознание или речь: ОНМК, недавняя тяжёлая ЧМТ, постприступное состояние, выраженная боль, лихорадка' },
+];
+
+export interface CognitiveIntake {
+  educationYears: string;
+  primaryLanguage: 'ru' | 'other';
+  russianSufficient: boolean | null;
+  checks: Record<string, boolean>;
+  informant: {
+    name: string;
+    relation: string;
+    contactFrequency: string;
+    knownFor: string;
+    canCompare: boolean | null;
+  };
+  gpcogSkipped: boolean;
+  gpcog: Record<string, GpcogAnswer>;
+}
+
+export const EMPTY_COGNITIVE_INTAKE: CognitiveIntake = {
+  educationYears: '',
+  primaryLanguage: 'ru',
+  russianSufficient: null,
+  checks: {},
+  informant: { name: '', relation: '', contactFrequency: '', knownFor: '', canCompare: null },
+  gpcogSkipped: false,
+  gpcog: {},
+};

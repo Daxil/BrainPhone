@@ -13,6 +13,7 @@ import {
   updatePatient,
   deletePatient,
   saveConsent,
+  saveCognitiveIntake,
   submitCase,
   getTodayStats,
   reviewCase,
@@ -49,6 +50,7 @@ router.get(    '/:id',                 auth, async (req, res) => { try { await g
 router.put(    '/:id',                 auth, async (req, res) => { try { await updatePatient(req, res); } catch { res.status(500).json({ success: false, error: 'Failed to update patient' }); } });
 router.delete( '/:id',                 auth, async (req, res) => { try { await deletePatient(req, res); } catch { res.status(500).json({ success: false, error: 'Failed to delete patient' }); } });
 router.post(   '/:id/consent',         auth, async (req, res) => { try { await saveConsent(req, res); } catch { res.status(500).json({ success: false, error: 'Failed to save consent' }); } });
+router.put(    '/:id/cognitive',       auth, async (req, res) => { try { await saveCognitiveIntake(req, res); } catch { res.status(500).json({ success: false, error: 'Failed to save cognitive intake' }); } });
 router.post(   '/:id/submit',          auth, async (req, res) => { try { await submitCase(req, res); } catch { res.status(500).json({ success: false, error: 'Failed to submit case' }); } });
 router.post(   '/:id/review',          auth, async (req, res) => { try { await reviewCase(req, res); } catch { res.status(500).json({ success: false, error: 'Failed to review case' }); } });
 

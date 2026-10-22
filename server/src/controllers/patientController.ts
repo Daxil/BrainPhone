@@ -606,6 +606,90 @@ export const saveConsent = async (req: Request, res: Response) => {
   }
 };
 
+// ─── Когнитивная анкета (приём, информант, GPCOG) ─────────────────────────────
+
+const GPCOG_QUESTION_IDS = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6'] as const;
+const GPCOG_ANSWERS = ['yes', 'no', 'unknown', 'notApplicable'] as const;
+const INTAKE_CHECK_IDS = ['hearing', 'vision', 'noDelirium', 'noAcuteCondition'] as const;
+
+const asText = (v: unknown, max = 200): string => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+const asBool = (v: unknown): boolean => v === true || v === 'true';
+
+/** Шкала GPCOG идёт «наоборот»: «Да» (информант заметил ухудшение) — 0 баллов, любой другой ответ — 1. */
+function gpcogScore(answers: Record<string, string>): number {
+  return GPCOG_QUESTION_IDS.reduce((sum, q) => sum + (answers[q] && answers[q] !== 'yes' ? 1 : 0), 0);
+}
+
+export const saveCognitiveIntake = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const body = req.body ?? {};
+
+    const patient = await db.oneOrNone('SELECT id, created_by FROM patients WHERE id = $1', [id]);
+    if (!patient) return res.status(404).json({ success: false, error: 'Кейс не найден' });
+    if (req.user!.role !== 'admin' && patient.created_by !== req.user!.id) {
+      return res.status(403).json({ success: false, error: 'Нет доступа' });
+    }
+
+    const education = parseInt(body.education_years, 10);
+    if (!Number.isInteger(education) || education < 0 || education > 40) {
+      return res.status(400).json({ success: false, error: 'Укажите образование (полных лет, 0–40)' });
+    }
+    const language = body.primary_language === 'other' ? 'other' : 'ru';
+
+    const checks: Record<string, boolean> = {};
+    for (const c of INTAKE_CHECK_IDS) checks[c] = asBool(body.checks?.[c]);
+
+    const informantIn = body.informant ?? {};
+    const informant = {
+      name:             asText(informantIn.name),
+      relation:         asText(informantIn.relation),
+      contact_frequency: asText(informantIn.contact_frequency),
+      known_for:        asText(informantIn.known_for),
+      can_compare:      asBool(informantIn.can_compare),
+    };
+
+    const gpcogSkipped = asBool(body.gpcog_skipped);
+    const answers: Record<string, string> = {};
+    if (!gpcogSkipped) {
+      for (const q of GPCOG_QUESTION_IDS) {
+        const a = body.gpcog?.[q];
+        if (!(GPCOG_ANSWERS as readonly string[]).includes(a)) {
+          return res.status(400).json({ success: false, error: 'Ответьте на все вопросы GPCOG или пропустите его' });
+        }
+        answers[q] = a;
+      }
+    }
+
+    const intake = {
+      education_years: education,
+      primary_language: language,
+      russian_sufficient: language === 'other' ? asBool(body.russian_sufficient) : null,
+      checks,
+      informant,
+      gpcog_skipped: gpcogSkipped,
+      gpcog: gpcogSkipped ? null : answers,
+      gpcog_score: gpcogSkipped ? null : gpcogScore(answers),
+      saved_at: new Date().toISOString(),
+    };
+
+    const updated = await db.one(
+      'UPDATE patients SET cognitive_intake = $2, updated_at = NOW() WHERE id = $1 RETURNING *',
+      [id, JSON.stringify(intake)]
+    );
+
+    // Обновляем data.json в бакете, чтобы анкета лежала рядом с аудио кейса.
+    savePatientJsonToS3(updated).catch((err) =>
+      console.warn('S3 patient JSON upload skipped:', err.message)
+    );
+
+    res.json({ success: true, data: { cognitive_intake: intake } });
+  } catch (error: any) {
+    console.error('saveCognitiveIntake error:', error.message);
+    res.status(500).json({ success: false, error: 'Ошибка сохранения анкеты' });
+  }
+};
+
 // ─── Отправка кейса ───────────────────────────────────────────────────────────
 
 export const submitCase = async (req: Request, res: Response) => {

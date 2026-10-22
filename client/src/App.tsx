@@ -3,7 +3,7 @@ import { api } from './services/api';
 import { useAudioRecorder } from './hooks/useAudioRecorder';
 import { formatTime, formatFileSize, generatePatientId } from './utils/dataUtils';
 import type { PatientRecord, ProtocolType, Screen } from './types';
-import type { AudioRecording } from './types/forms';
+import { EMPTY_COGNITIVE_INTAKE, type AudioRecording, type CognitiveIntake } from './types/forms';
 import type { CaseTask, CaseFlowState, ConsentData } from './types/case';
 
 // Screens
@@ -14,6 +14,7 @@ import ProcessingScreen from './components/screens/ProcessingScreen';
 import ResultsScreen from './components/screens/ResultsScreen';
 import ViewScreen from './components/screens/ViewScreen';
 import ProtocolSelectScreen from './components/screens/ProtocolSelectScreen';
+import CognitiveIntakeScreen from './components/screens/CognitiveIntakeScreen';
 import AssessmentsScreen from './components/screens/AssessmentsScreen';
 import SplashScreen from './components/screens/SplashScreen';
 import OnboardingScreen from './components/screens/OnboardingScreen';
@@ -33,7 +34,7 @@ import TotpPage from './pages/TotpPage';
 import InvitePage from './pages/InvitePage';
 import SetupTotpPage from './pages/SetupTotpPage';
 import AdminPage from './pages/AdminPage';
-import { ONBOARDING_KEY, PROTOCOL_TASKS } from './constants/statuses';
+import { ONBOARDING_KEY, tasksForCase } from './constants/statuses';
 import { API_BASE_URL } from './config';
 import { enqueue, startQueueProcessor } from './services/offlineQueue';
 import { saveDraft, loadDraft, clearDraft } from './services/draftCache';
@@ -58,6 +59,27 @@ function isAdminPath(): boolean {
 // ─── Auth gate wrapper ────────────────────────────────────────────────────────
 
 type AuthScreen = 'splash' | 'login' | 'totp' | 'setup-totp' | 'onboarding' | 'app' | 'admin' | 'invite';
+
+/** Анкета с сервера (snake_case JSONB) → форма клиента. */
+function intakeFromServer(raw: any): CognitiveIntake | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const inf = raw.informant ?? {};
+  return {
+    educationYears:    raw.education_years != null ? String(raw.education_years) : '',
+    primaryLanguage:   raw.primary_language === 'other' ? 'other' : 'ru',
+    russianSufficient: raw.russian_sufficient ?? null,
+    checks:            raw.checks ?? {},
+    informant: {
+      name:             inf.name ?? '',
+      relation:         inf.relation ?? '',
+      contactFrequency: inf.contact_frequency ?? '',
+      knownFor:         inf.known_for ?? '',
+      canCompare:       inf.can_compare ?? null,
+    },
+    gpcogSkipped: !!raw.gpcog_skipped,
+    gpcog:        raw.gpcog ?? {},
+  };
+}
 
 function AppWithAuth() {
   const { user, loading, logout } = useAuth();
@@ -267,6 +289,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
             nativeLanguage:   p.native_language || '',
             hasParkinsonism:  p.has_parkinsonism === true || p.has_parkinsonism === 'true',
             hasCognitive:     p.has_cognitive === true || p.has_cognitive === 'true',
+            cognitiveIntake:  intakeFromServer(p.cognitive_intake),
             parkinsonismStage: p.parkinsonism_stage || '',
             comorbidities:    p.comorbidities || '',
             mocaScore:        p.moca_score  ?? '',
@@ -346,7 +369,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
     }
 
     const recordedByCode = new Map((record.audioRecordings || []).map((a) => [a.type, a]));
-    const tasks: CaseTask[] = PROTOCOL_TASKS[protocol].map((def) => {
+    const tasks: CaseTask[] = tasksForCase(protocol, record.hasCognitive).map((def) => {
       const rec = recordedByCode.get(def.fileCode);
       return {
         id:       def.fileCode,
@@ -370,7 +393,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
       activeTaskId: null,
     });
     // Если согласие уже давалось — сразу к списку заданий, иначе к анкете.
-    setScreen(consentDone ? 'taskList' : 'form');
+    setScreen(consentDone ? (record.hasCognitive && !record.cognitiveIntake ? 'cognitiveIntake' : 'taskList') : 'form');
   };
 
   const handleBack = () => {
@@ -476,9 +499,15 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
       setCaseFlow(prev => {
         // Продолжаем существующий флоу того же пациента — сохраняем прогресс заданий/согласия.
         if (prev && prev.patientId === saved.id) {
-          return { ...prev, protocol };
+          // Флаг «когнитивный» мог быть отмечен уже после выбора протокола —
+          // дописываем недостающие задания, не трогая записанные.
+          const have = new Set(prev.tasks.map(t => t.id));
+          const extra: CaseTask[] = tasksForCase(protocol, currentRecord.hasCognitive)
+            .filter(def => !have.has(def.fileCode))
+            .map(def => ({ id: def.fileCode, taskType: def.taskType, label: def.label, fileCode: def.fileCode, required: def.required, status: 'NOT_RECORDED' as const }));
+          return { ...prev, protocol, tasks: [...prev.tasks, ...extra] };
         }
-        const tasks: CaseTask[] = PROTOCOL_TASKS[protocol].map(def => ({
+        const tasks: CaseTask[] = tasksForCase(protocol, currentRecord.hasCognitive).map(def => ({
           id:       def.fileCode,
           taskType: def.taskType,
           label:    def.label,
@@ -508,6 +537,28 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
       signature_url:  consent.signatureDataUrl,
     }).catch(() => {/* не блокируем, сохранено локально в caseFlow */});
     setCaseFlow(prev => prev ? { ...prev, consent, caseStatus: 'RECORDING' } : null);
+    setScreen(currentRecord?.hasCognitive ? 'cognitiveIntake' : 'taskList');
+  };
+
+  const handleSaveCognitiveIntake = async (intake: CognitiveIntake) => {
+    if (!caseFlow) throw new Error('No case flow');
+    const result = await api.saveCognitiveIntake(caseFlow.patientId, {
+      education_years:    intake.educationYears,
+      primary_language:   intake.primaryLanguage,
+      russian_sufficient: intake.russianSufficient,
+      checks:             intake.checks,
+      informant: {
+        name:              intake.informant.name,
+        relation:          intake.informant.relation,
+        contact_frequency: intake.informant.contactFrequency,
+        known_for:         intake.informant.knownFor,
+        can_compare:       intake.informant.canCompare,
+      },
+      gpcog_skipped: intake.gpcogSkipped,
+      gpcog:         intake.gpcog,
+    });
+    if (!result.success) throw new Error(result.error || 'Save failed');
+    setCurrentRecord(prev => prev ? { ...prev, cognitiveIntake: intake } : prev);
     setScreen('taskList');
   };
 
@@ -829,6 +880,18 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
           />
         );
 
+      // ── Когнитивная анкета (если отмечен когнитивный профиль) ────────────
+      case 'cognitiveIntake':
+        if (!caseFlow) return null;
+        return (
+          <CognitiveIntakeScreen
+            value={currentRecord?.cognitiveIntake ?? EMPTY_COGNITIVE_INTAKE}
+            onChange={(cognitiveIntake) => setCurrentRecord(prev => prev ? { ...prev, cognitiveIntake } : prev)}
+            onBack={() => setScreen('consent')}
+            onSave={handleSaveCognitiveIntake}
+          />
+        );
+
       // ── E7: Список заданий ────────────────────────────────────────────────
       case 'taskList':
         if (!caseFlow) return null;
@@ -837,7 +900,7 @@ function MainApp({ onGoAdmin, isOffline }: { onGoAdmin: () => void; onLogout: ()
             tasks={caseFlow.tasks}
             protocol={caseFlow.protocol}
             caseNumber={currentRecord?.caseNumber}
-            onBack={() => setScreen('consent')}
+            onBack={() => setScreen(currentRecord?.hasCognitive ? 'cognitiveIntake' : 'consent')}
             onRecordTask={handleRecordTask}
             onSkipTask={handleSkipTask}
             onProceedToSubmit={() => setScreen('readyToSubmit')}

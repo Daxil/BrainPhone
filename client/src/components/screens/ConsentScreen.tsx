@@ -96,16 +96,16 @@ export default function ConsentScreen({ caseId, doctorId, onBack, onConfirm }: C
   const canConfirm = check1 && check2 && hasSig;
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Навигация */}
-      <div className="border-b border-gray-100 px-5 py-4 flex items-center gap-3 flex-shrink-0">
+      <div className="border-b border-[#e9ebfc] bg-white px-5 py-4 flex items-center gap-3 flex-shrink-0">
         <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-gray-100">
           <ChevronLeft className="w-5 h-5 text-gray-600" />
         </button>
         <h1 className="font-semibold text-gray-900">{STRINGS.CONSENT_TITLE}</h1>
       </div>
 
-      <main className="flex-1 overflow-y-auto px-5 py-5 pb-40 space-y-5">
+      <main className="mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-5 py-5 pb-40 space-y-5">
         <p className="text-sm text-gray-500">{STRINGS.CONSENT_SUBTITLE}</p>
 
         {/* Текст согласия */}
@@ -167,7 +167,7 @@ export default function ConsentScreen({ caseId, doctorId, onBack, onConfirm }: C
       </main>
 
       {/* Кнопка подтверждения */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 px-5 py-4">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-[#e9ebfc] px-5 py-4 flex flex-col items-center [&>*]:w-full [&>*]:max-w-2xl">
         {!check1 || !check2 ? (
           <p className="text-xs text-center text-amber-600 mb-2">{STRINGS.CONSENT_BOTH_CHECKS}</p>
         ) : !hasSig ? (

@@ -62,8 +62,8 @@ export default function MyCasesScreen({ records, onBack, onViewCase, onDeleteDra
     .filter(r => filter === 'all' || r.caseStatus === filter);
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-      <div className="border-b border-gray-100 px-5 py-4 flex items-center gap-3 flex-shrink-0">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="border-b border-[#e9ebfc] bg-white px-5 py-4 flex items-center gap-3 flex-shrink-0">
         <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-gray-100">
           <ChevronLeft className="w-5 h-5 text-gray-600" />
         </button>
@@ -71,7 +71,7 @@ export default function MyCasesScreen({ records, onBack, onViewCase, onDeleteDra
       </div>
 
       {/* Фильтры */}
-      <div className="px-4 py-3 border-b border-gray-100 flex gap-2 overflow-x-auto">
+      <div className="px-4 py-3 border-b border-[#e9ebfc] bg-white flex gap-2 overflow-x-auto">
         {FILTERS.map(f => (
           <button
             key={f.key}
@@ -85,7 +85,7 @@ export default function MyCasesScreen({ records, onBack, onViewCase, onDeleteDra
         ))}
       </div>
 
-      <main className="flex-1 overflow-y-auto px-4 py-4">
+      <main className="mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-4 py-4">
         {filtered.length === 0 ? (
           <div className="text-center py-16 text-gray-400 text-sm">{STRINGS.CASES_EMPTY}</div>
         ) : (

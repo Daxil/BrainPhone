@@ -58,9 +58,9 @@ export default function TaskListScreen({
   const protLabel = protocol === 'phonemes' ? 'Фонемы' : protocol === 'speech' ? 'Речь' : 'Полный';
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Навигация */}
-      <div className="border-b border-gray-100 px-5 py-4 flex items-center gap-3 flex-shrink-0">
+      <div className="border-b border-[#e9ebfc] bg-white px-5 py-4 flex items-center gap-3 flex-shrink-0">
         <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-gray-100">
           <ChevronLeft className="w-5 h-5 text-gray-600" />
         </button>
@@ -70,7 +70,7 @@ export default function TaskListScreen({
         </div>
       </div>
 
-      <main className="flex-1 px-5 py-5 pb-32 space-y-3 overflow-y-auto">
+      <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-5 pb-32 space-y-3 overflow-y-auto">
         {tasks.map((task, idx) => {
           const isDone   = task.status === 'RECORDED_LOCAL' || task.status === 'UPLOADED' || task.status === 'PASSED_SERVER_QC';
           const isSkipped = task.status === 'SKIPPED';
@@ -143,7 +143,7 @@ export default function TaskListScreen({
       </main>
 
       {/* Кнопка «Далее» */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 px-5 py-4">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-[#e9ebfc] px-5 py-4 flex flex-col items-center [&>*]:w-full [&>*]:max-w-2xl">
         <button
           onClick={onProceedToSubmit}
           disabled={!requiredDone}

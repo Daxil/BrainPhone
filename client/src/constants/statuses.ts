@@ -36,7 +36,7 @@ export type AudioStatus =
   | 'SKIPPED';
 
 // ── Коды ошибок локального QC ─────────────────────────────────────────────────
-export type QCFailCode = 'LQC-DUR' | 'LQC-SIL' | 'LQC-CLIP' | 'LQC-LOW';
+export type QCFailCode = 'LQC-DUR' | 'LQC-LONG' | 'LQC-SIL' | 'LQC-CLIP' | 'LQC-LOW';
 
 export interface QCResult {
   passed: boolean;
@@ -47,13 +47,6 @@ export interface QCResult {
 
 // ── Правила QC ────────────────────────────────────────────────────────────────
 export const QC_RULES = {
-  // Фонемы: обязательный минимум и рекомендуемая длина (секунды)
-  PHONEME_MIN_SEC: 5,
-  PHONEME_REC_SEC: 9,
-
-  // Речь / чтение: минимальная длина (секунды)
-  SPEECH_MIN_SEC: 20,
-
   // Клиппинг: если суммарно >3с клиппинга → обязательна перезапись
   CLIP_MAX_SEC: 3,
   // Порог клиппинга: сэмпл считается клиппированным при |x| >= этого значения
@@ -75,47 +68,56 @@ export const QC_RULES = {
 } as const;
 
 // ── Типы заданий по протоколам ────────────────────────────────────────────────
+// Задания и границы длительности совпадают с brainphone-pro, чтобы записи
+// датасета были сопоставимы с тем, что получают модели в продукте.
 export type TaskType =
-  | 'PH-A'    // Фонема «аааааааа»
-  | 'PH-OI'   // Фонемы «о-и-о-и»
-  | 'SP-PIC1' // Описание картинки «Вор печенья»
-  | 'SP-PIC2' // Описание картинки «Кошка на дереве»
-  | 'SP-READ' // Чтение текста «Гималайский медведь»;
+  | 'PH-A'    // Протяжный звук «А»
+  | 'SP-READ' // Чтение текста «Гималайский медведь»
+  | 'SP-PIC'; // Описание сюжетной картинки (из когнитивного скрининга brainphone-pro)
 
-// Правила длительности по типу задания
-export const TASK_DURATION_RULES: Record<TaskType, { min?: number; rec?: number; max?: number; isPhoneme: boolean }> = {
-  'PH-A':    { min: QC_RULES.PHONEME_MIN_SEC, rec: QC_RULES.PHONEME_REC_SEC, isPhoneme: true },
-  'PH-OI':   { min: QC_RULES.PHONEME_MIN_SEC, rec: QC_RULES.PHONEME_REC_SEC, isPhoneme: true },
-  'SP-PIC1': { min: QC_RULES.SPEECH_MIN_SEC, max: 90, isPhoneme: false },
-  'SP-PIC2': { min: QC_RULES.SPEECH_MIN_SEC, max: 90, isPhoneme: false },
-  'SP-READ': { min: QC_RULES.SPEECH_MIN_SEC, max: 120, isPhoneme: false },
+// Правила длительности по типу задания (секунды). Вне диапазона — перезапись.
+// Поведение записи, как в brainphone-pro: «А» останавливается само на максимуме,
+// при чтении 15 с тишины останавливают запись, картинку останавливает врач.
+export const TASK_DURATION_RULES: Record<TaskType, {
+  min: number;
+  max: number;
+  autoStopAtMax?: boolean;
+  silenceTimeout?: number;
+}> = {
+  'PH-A':    { min: 7,  max: 15,  autoStopAtMax: true },
+  'SP-READ': { min: 25, max: 180, silenceTimeout: 15 },
+  'SP-PIC':  { min: 15, max: 180 },
 };
+
+// Обратный отсчёт перед записью: микрофон уже открыт, отсчёт идёт на живом входе.
+export const COUNT_IN_SECONDS = 3;
+// Нормированный уровень (0–1), ниже которого вход считается тишиной.
+export const SILENCE_LEVEL = 0.12;
 
 // ── Определения заданий для каждого протокола ─────────────────────────────────
 export interface TaskDefinition {
   taskType: TaskType;
   label: string;
-  fileCode: string;   // для именования файлов: N001-PH-A, N001-SP-PIC1 и т.д.
+  fileCode: string;   // для именования файлов: N001-PH-A, N001-SP-PIC и т.д.
   required: boolean;
 }
 
+const TASK_A:       TaskDefinition = { taskType: 'PH-A',    label: 'Протяжный звук «А»',                  fileCode: 'PH-A',    required: true };
+// Чтение в brainphone-pro необязательно — так же и здесь.
+const TASK_READING: TaskDefinition = { taskType: 'SP-READ', label: 'Чтение текста «Гималайский медведь»', fileCode: 'SP-READ', required: false };
+const TASK_PICTURE: TaskDefinition = { taskType: 'SP-PIC',  label: 'Описание сюжетной картинки',          fileCode: 'SP-PIC',  required: true };
+
 export const PROTOCOL_TASKS: Record<'phonemes' | 'speech' | 'full', TaskDefinition[]> = {
-  phonemes: [
-    { taskType: 'PH-A',  label: 'Фонема «аааааааа»',             fileCode: 'PH-A',    required: true },
-    { taskType: 'PH-OI', label: 'Фонемы «о-и-о-и-о-и»',          fileCode: 'PH-OI',   required: true },
-  ],
-  speech: [
-    { taskType: 'SP-PIC1', label: 'Описание картинки «Вор печенья»',       fileCode: 'SP-PIC1', required: true },
-    { taskType: 'SP-READ', label: 'Чтение текста «Гималайский медведь»',   fileCode: 'SP-READ', required: true },
-  ],
-  full: [
-    { taskType: 'PH-A',    label: 'Фонема «аааааааа»',                      fileCode: 'PH-A',    required: true },
-    { taskType: 'PH-OI',   label: 'Фонемы «о-и-о-и-о-и»',                  fileCode: 'PH-OI',   required: true },
-    { taskType: 'SP-PIC1', label: 'Описание картинки «Вор печенья»',        fileCode: 'SP-PIC1', required: true },
-    { taskType: 'SP-PIC2', label: 'Описание картинки «Кошка на дереве»',    fileCode: 'SP-PIC2', required: true },
-    { taskType: 'SP-READ', label: 'Чтение текста «Гималайский медведь»',    fileCode: 'SP-READ', required: true },
-  ],
+  phonemes: [TASK_A],
+  speech:   [TASK_PICTURE, TASK_READING],
+  full:     [TASK_A, TASK_READING, TASK_PICTURE],
 };
+
+/** Задания кейса: при когнитивном профиле всегда есть описание картинки. */
+export function tasksForCase(protocol: 'phonemes' | 'speech' | 'full', hasCognitive?: boolean): TaskDefinition[] {
+  const base = PROTOCOL_TASKS[protocol];
+  return hasCognitive && !base.some(t => t.taskType === 'SP-PIC') ? [...base, TASK_PICTURE] : base;
+}
 
 // ── Правила оплаты ────────────────────────────────────────────────────────────
 export interface PaymentEligibility {

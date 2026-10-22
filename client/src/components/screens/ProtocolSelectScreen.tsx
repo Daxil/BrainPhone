@@ -11,26 +11,26 @@ export default function ProtocolSelectScreen({ onSelectProtocol, onBack }: Proto
     {
       type: 'phonemes',
       title: 'Фонемы',
-      description: 'Запись отдельных звуков для анализа артикуляции',
-      duration: '~2 минуты',
+      description: 'Протяжный звук «А»',
+      duration: '~1 минута',
     },
     {
       type: 'speech',
       title: 'Речь',
-      description: 'Описание картинок и чтение текста',
+      description: 'Описание сюжетной картинки и чтение текста',
       duration: '~5 минут',
     },
     {
       type: 'full',
       title: 'Полный протокол',
-      description: 'Комплексная запись всех тестов',
-      duration: '~10 минут',
+      description: 'Звук «А», чтение текста и описание сюжетной картинки',
+      duration: '~7 минут',
     },
   ];
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-      <div className="border-b border-gray-200">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="border-b border-[#e9ebfc] bg-white">
         <div className="px-6 py-4">
           <button
             onClick={onBack}
