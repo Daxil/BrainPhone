@@ -66,15 +66,15 @@ export default function ReadyToSubmitScreen({
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Заголовок */}
-      <div className="border-b border-gray-100 px-5 py-4">
+      <div className="border-b border-[#e9ebfc] bg-white px-5 py-4">
         <button onClick={onBack} className="text-gray-500 text-sm hover:underline mb-1">{STRINGS.BACK}</button>
         <h1 className="text-xl font-bold text-gray-900">{STRINGS.SUBMIT_TITLE}</h1>
         <p className="text-sm text-gray-500 mt-1">{STRINGS.SUBMIT_CHECKLIST_HEADER}</p>
       </div>
 
-      <main className="flex-1 px-5 py-6 pb-32 space-y-3">
+      <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-6 pb-32 space-y-3">
         {checks.map((c, i) => (
           <div key={i} className={`flex items-center gap-3 p-4 rounded-xl border ${c.ok ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
             {c.ok
@@ -94,7 +94,7 @@ export default function ReadyToSubmitScreen({
         {error && <p className="text-sm text-red-600 text-center">{error}</p>}
       </main>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 px-5 py-4">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-[#e9ebfc] px-5 py-4 flex flex-col items-center [&>*]:w-full [&>*]:max-w-2xl">
         <button
           onClick={handleSubmit}
           disabled={!allOk || submitting}

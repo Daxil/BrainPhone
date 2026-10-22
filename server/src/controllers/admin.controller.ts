@@ -14,6 +14,7 @@ export async function createInviteHandler(req: Request, res: Response): Promise<
     res.status(400).json({ success: false, error: 'Email is required' });
     return;
   }
+  // superadmin через приглашение не выдаётся — только CLI (npm run role:superadmin).
   if (!['admin', 'doctor'].includes(role)) {
     res.status(400).json({ success: false, error: 'Role must be admin or doctor' });
     return;

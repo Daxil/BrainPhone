@@ -1,6 +1,7 @@
 import { ChevronLeft, Edit, Play, Pause, X, Cloud, ZoomIn } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import type { PatientRecord } from '../../types';
+import { GPCOG_QUESTIONS, GPCOG_ANSWER_LABELS, INTAKE_CHECKS, gpcogAnswerScore } from '../../types/forms';
 
 interface ViewScreenProps {
   record: PatientRecord | null;
@@ -68,7 +69,7 @@ export default function ViewScreen({ record, onBack, onEdit }: ViewScreenProps) 
   const photoCount = record.photos?.length || 0;
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Лайтбокс */}
       {selectedPhoto && (
         <div
@@ -90,7 +91,7 @@ export default function ViewScreen({ record, onBack, onEdit }: ViewScreenProps) 
         </div>
       )}
 
-      <div className="border-b border-gray-200">
+      <div className="border-b border-[#e9ebfc] bg-white">
         <div className="px-6 py-4 flex items-center justify-between">
           <button
             onClick={onBack}
@@ -154,6 +155,40 @@ export default function ViewScreen({ record, onBack, onEdit }: ViewScreenProps) 
                 <p className="text-gray-700">{record.notes}</p>
               </div>
             )}
+
+            {record.cognitiveIntake && (() => {
+              const ci = record.cognitiveIntake;
+              const answered = GPCOG_QUESTIONS.filter(q => ci.gpcog[q.id]);
+              const score = answered.reduce((sum, q) => sum + gpcogAnswerScore(ci.gpcog[q.id]), 0);
+              const row = (label: string, value: string) => (
+                <div className="flex justify-between gap-4 text-sm">
+                  <span className="text-gray-500">{label}</span>
+                  <span className="text-gray-900 text-right">{value || '—'}</span>
+                </div>
+              );
+              return (
+                <div className="bg-gray-50 rounded-xl p-6 space-y-2">
+                  <h3 className="font-semibold text-gray-900 mb-2">Когнитивная анкета</h3>
+                  {row('Образование, лет', ci.educationYears)}
+                  {row('Основной язык', ci.primaryLanguage === 'ru' ? 'Русский' : 'Другой')}
+                  {ci.primaryLanguage === 'other' && row('Владеет русским достаточно', ci.russianSufficient ? 'Да' : 'Нет')}
+                  {INTAKE_CHECKS.map(c => row(c.text, ci.checks[c.id] ? 'Подтверждено' : 'Нет'))}
+                  <h4 className="font-medium text-gray-900 pt-3">Информант</h4>
+                  {row('ФИО', ci.informant.name)}
+                  {row('Родство', ci.informant.relation)}
+                  {row('Как часто общается', ci.informant.contactFrequency)}
+                  {row('Как давно знает', ci.informant.knownFor)}
+                  {row('Может сравнить с 5–10 лет назад', ci.informant.canCompare ? 'Да' : 'Нет')}
+                  <h4 className="font-medium text-gray-900 pt-3">GPCOG</h4>
+                  {ci.gpcogSkipped || answered.length === 0
+                    ? <p className="text-sm text-gray-500">Пропущен</p>
+                    : <>
+                        {GPCOG_QUESTIONS.map(q => row(q.text, GPCOG_ANSWER_LABELS[ci.gpcog[q.id]]))}
+                        {row('Сумма баллов', `${score} из ${GPCOG_QUESTIONS.length}`)}
+                      </>}
+                </div>
+              );
+            })()}
 
             {/* Счётчик медиа */}
             <div className="bg-gray-50 rounded-xl p-6">

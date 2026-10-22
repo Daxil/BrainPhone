@@ -7,8 +7,8 @@ export type { QCResult };
 
 export async function analyzeAudio(
   blob: Blob,
-  minDurationSec?: number,
-  isPhoneme = false,
+  minDurationSec: number,
+  maxDurationSec?: number,
 ): Promise<QCResult> {
   try {
     const arrayBuffer = await blob.arrayBuffer();
@@ -25,9 +25,13 @@ export async function analyzeAudio(
     const sampleRate = audioBuffer.sampleRate;
 
     // LQC-DUR: слишком короткая запись
-    const minSec = minDurationSec ?? (isPhoneme ? QC_RULES.PHONEME_MIN_SEC : QC_RULES.SPEECH_MIN_SEC);
-    if (duration < minSec) {
+    if (duration < minDurationSec) {
       return { passed: false, code: 'LQC-DUR', canKeep: false, canSkip: true };
+    }
+
+    // LQC-LONG: слишком длинная запись — пациент ушёл от задания
+    if (maxDurationSec !== undefined && duration > maxDurationSec) {
+      return { passed: false, code: 'LQC-LONG', canKeep: false, canSkip: true };
     }
 
     // LQC-CLIP: суммарная длина клиппированных участков > 3 с

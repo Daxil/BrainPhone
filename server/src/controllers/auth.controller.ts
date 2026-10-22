@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { hasAdminRights } from '../middleware/requireRole';
 import {
   findByEmail,
   findById,
@@ -93,7 +94,7 @@ export async function login(req: Request, res: Response): Promise<void> {
 
         // Notify admin(s)
         const admins = await db.manyOrNone<{ email: string }>(
-          "SELECT email FROM users WHERE role = 'admin'"
+          "SELECT email FROM users WHERE role IN ('admin', 'superadmin')"
         );
         for (const admin of admins) {
           await sendEmail('admin_alert_lockout', admin.email, {
@@ -313,7 +314,7 @@ export async function setPassword(req: Request, res: Response): Promise<void> {
     time: nowIso(),
   }, { userId: user.id, skipRateLimit: true });
 
-  const requireTotpSetup = TOTP_ENABLED && (user.role === 'admin' || user.totp_enabled);
+  const requireTotpSetup = TOTP_ENABLED && (hasAdminRights(user.role) || user.totp_enabled);
 
   if (requireTotpSetup) {
     // Issue a scoped session — user MUST set up TOTP before accessing anything else
@@ -326,7 +327,7 @@ export async function setPassword(req: Request, res: Response): Promise<void> {
     res.json({
       success: true,
       requireTotpSetup: true,
-      totpMandatory: user.role === 'admin',
+      totpMandatory: hasAdminRights(user.role),
       user: { id: user.id, email: user.email, role: user.role },
     });
   } else {
@@ -406,7 +407,7 @@ export async function skipTotpSetup(req: Request, res: Response): Promise<void> 
   const user = await findById(req.user!.id);
   if (!user) { res.status(401).json({ success: false, error: 'User not found' }); return; }
 
-  if (user.role === 'admin') {
+  if (hasAdminRights(user.role)) {
     res.status(403).json({ success: false, error: 'Admins must configure TOTP' });
     return;
   }
@@ -443,7 +444,7 @@ export async function disableTotpHandler(req: Request, res: Response): Promise<v
   const user = await findById(req.user!.id);
   if (!user) { res.status(401).json({ success: false, error: 'User not found' }); return; }
 
-  if (user.role === 'admin') {
+  if (hasAdminRights(user.role)) {
     res.status(403).json({ success: false, error: 'Admins cannot disable 2FA' });
     return;
   }

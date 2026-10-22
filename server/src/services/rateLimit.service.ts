@@ -122,3 +122,32 @@ export async function check404RateLimit(ip: string): Promise<RateLimitResult> {
   }
   return result;
 }
+
+// ─── Generic consume-style limit (dataset API, step-up, …) ───────────────────
+
+/**
+ * Посчитать попытку и сказать, укладываемся ли в лимит `max` за окно.
+ * Fail-closed: если лимитер недоступен — запрещаем (используется для
+ * чувствительных операций).
+ */
+export async function consumeKeyedLimit(
+  scope: string,
+  id: string,
+  windowMs: number,
+  max: number
+): Promise<RateLimitResult> {
+  const key = sha256(`${scope}:${id}`);
+  try {
+    const limiter = getLimiter(false);
+    const res = await limiter.check(key, windowMs, max);
+    if (!res.allowed) return res;
+    const count = await limiter.increment(key, windowMs);
+    return count > max ? { allowed: false, retryAfterMs: windowMs } : { allowed: true };
+  } catch {
+    return { allowed: false, retryAfterMs: 60_000 };
+  }
+}
+
+export async function clearKeyedLimit(scope: string, id: string): Promise<void> {
+  await getLimiter(false).clear(sha256(`${scope}:${id}`)).catch(() => {});
+}

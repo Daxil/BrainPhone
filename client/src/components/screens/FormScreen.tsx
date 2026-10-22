@@ -4,6 +4,7 @@ import { useRef } from 'react';
 import { ChevronLeft, Camera, X, Plus } from 'lucide-react';
 import type { PatientRecord } from '../../types';
 import { STRINGS } from '../../constants/ui';
+import { CheckCard } from '../ui/form';
 
 const ASSESSMENT_TESTS: { key: keyof PatientRecord; label: string; max: string }[] = [
   { key: 'mocaScore',  label: 'MoCA',  max: '/30' },
@@ -44,16 +45,16 @@ export default function FormScreen({ record, onBack, onChange, onContinue, submi
   const scalePhotos   = (record.photos || []).filter(p => p.category === 'scale');
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Навигация */}
-      <div className="border-b border-gray-100 px-5 py-4 flex items-center gap-3">
+      <div className="border-b border-[#e9ebfc] bg-white px-5 py-4 flex items-center gap-3">
         <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-gray-100">
           <ChevronLeft className="w-5 h-5 text-gray-600" />
         </button>
         <h1 className="font-semibold text-gray-900">{STRINGS.FORM_TITLE}</h1>
       </div>
 
-      <main className="flex-1 px-5 py-6 space-y-6 overflow-y-auto pb-32">
+      <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-6 space-y-6 overflow-y-auto pb-32">
 
         {/* Пол */}
         <div>
@@ -91,24 +92,8 @@ export default function FormScreen({ record, onBack, onChange, onContinue, submi
 
         {/* Паркинсонизм? / Когнитивные нарушения? */}
         <div className="space-y-3">
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={!!record.hasParkinsonism}
-              onChange={e => set('hasParkinsonism', e.target.checked)}
-              className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <span className="text-sm font-medium text-gray-700">{STRINGS.FORM_PARKINSONISM}</span>
-          </label>
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={!!record.hasCognitive}
-              onChange={e => set('hasCognitive', e.target.checked)}
-              className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <span className="text-sm font-medium text-gray-700">{STRINGS.FORM_COGNITIVE}</span>
-          </label>
+          <CheckCard checked={!!record.hasParkinsonism} label={STRINGS.FORM_PARKINSONISM} onToggle={() => set('hasParkinsonism', !record.hasParkinsonism)} />
+          <CheckCard checked={!!record.hasCognitive} label={STRINGS.FORM_COGNITIVE} onToggle={() => set('hasCognitive', !record.hasCognitive)} />
         </div>
 
         {/* Основной диагноз — обязателен если нет Паркинсонизма и КН */}
@@ -243,7 +228,7 @@ export default function FormScreen({ record, onBack, onChange, onContinue, submi
       </main>
 
       {/* Кнопка «Далее: согласие» */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 px-5 py-4">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-[#e9ebfc] px-5 py-4 flex flex-col items-center [&>*]:w-full [&>*]:max-w-2xl">
         {!isValid() && requireDiagnosis && (
           <p className="text-xs text-red-500 mb-2 text-center">{STRINGS.FORM_ERROR_REQUIRED}</p>
         )}
