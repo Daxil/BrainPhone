@@ -303,21 +303,21 @@ export default function RecordingScreen({ task, onBack, onSave }: RecordingScree
 
         {/* Задание: инструкция и стимульный материал (как в brainphone-pro) */}
         <div className="w-full rounded-xl border border-[#e9ebfc] bg-white p-5 shadow-sm space-y-4">
-          <div className="flex items-start gap-4">
+          <div className="flex flex-col items-center gap-4">
             {stimulus.image && (
               <button
                 type="button"
                 onClick={() => setZoomed(true)}
-                className="group relative shrink-0 overflow-hidden rounded-lg border border-gray-200"
+                className="group relative flex w-full justify-center overflow-hidden rounded-lg border border-gray-200 bg-white"
                 aria-label="Увеличить картинку"
               >
-                <img src={stimulus.image} alt={stimulus.imageAlt} className="h-24 w-32 object-cover sm:h-28 sm:w-40" />
+                <img src={stimulus.image} alt={stimulus.imageAlt} className="max-h-[45vh] w-full object-contain" />
                 <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
                   <ZoomIn className="h-5 w-5 text-white" />
                 </span>
               </button>
             )}
-            <p className="text-sm font-medium leading-5 text-gray-900">{stimulus.instruction}</p>
+            <p className="w-full text-base font-medium leading-6 text-gray-900">{stimulus.instruction}</p>
           </div>
           {stimulus.text && (
             <p className="rounded-lg bg-gray-50 p-4 text-base leading-relaxed text-gray-800">{stimulus.text}</p>
